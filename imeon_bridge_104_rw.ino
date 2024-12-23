@@ -324,14 +324,18 @@ void modbusRTU(void* parameter) {
           if (maxWriteTime < writeTime) {
             maxWriteTime = writeTime;
           }
-          Serial.printf("  SUCCESS: Written %d register(s) starting at 0x%04X, time: %d\n", 
-            command.length, command.address, writeTime);
-          LOG_INFO("  SUCCESS: Written %d register(s) starting at 0x%04X, time: %d\n", 
-            command.length, command.address, writeTime);
+          Serial.printf("  SUCCESS: Written %d register(s) starting at 0x%04X %d, time: %d\n", 
+            command.length, command.address, command.address, writeTime);
+          LOG_INFO("  SUCCESS: Written %d register(s) starting at 0x%04X %d, time: %d\n", 
+            command.length, command.address, command.address, writeTime);
         } else {
-          Serial.printf("  ERROR: Write failed with code 0x%02X\n", result);
-          LOG_ERROR("  ERROR: Write failed with code 0x%02X\n", result);
+          Serial.printf("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
+          LOG_ERROR("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
           writeError++;
+          // Re-enqueue the failed command
+          if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
+            LOG_ERROR("Failed to re-enqueue failed command. Queue is full.");
+          }
         }
       } else {
         // when writeQueue is empty go on reading registers
@@ -358,8 +362,8 @@ void modbusRTU(void* parameter) {
           if (maxReadTime < readTime) {
             maxReadTime = readTime;
           }
-          LOG_DEBUG("ReadRTU success: %d, length: %d, time: %d :: ", reg, length, readTime);
-          Serial.printf("ReadRTU success: %d, length: %d, time: %d :: ", reg, length, readTime);
+          LOG_DEBUG("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
+          Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
           // Iterate through the response and print register values
           for (uint16_t i = 0; i < length; i++) {
             uint16_t value = mbImeon.getResponseBuffer(i);
