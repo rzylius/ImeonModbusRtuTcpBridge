@@ -32,7 +32,7 @@ ModbusIP mbBat;
 IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to send battery data
 
 // Write Queue Settings
-#define MAX_WRITE_VALUES 10  // Maximum number of registers per command
+#define MAX_WRITE_VALUES 15  // Maximum number of registers per command
 struct WriteCommand {
     uint16_t address;            // Register starting address
     uint16_t length;             // Number of registers to write
