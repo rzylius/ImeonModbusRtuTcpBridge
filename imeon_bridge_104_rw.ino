@@ -12,9 +12,7 @@
 
 // ---------------------- Configuration ----------------------
 // Syslog server configuration
-const char* syslogServerIP = "10.0.20.250";   // Replace with your syslog server's IP
-const uint16_t syslogServerPort = 514;       // Default syslog port is 514
-SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, syslogServerIP);
+SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
