@@ -333,8 +333,7 @@ void modbusRTU(void* parameter) {
           LOG_ERROR("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
           writeError++;
           // Re-enqueue the failed command
-          if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
-            LOG_ERROR("Failed to re-enqueue failed command. Queue is full.");
+          enqueueWriteCommand(command.address, command.length, command.values); // Use enqueueWriteCommand here
           }
         }
       } else {
