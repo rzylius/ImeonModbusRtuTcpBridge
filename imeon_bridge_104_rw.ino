@@ -17,7 +17,7 @@ const uint16_t syslogServerPort = 514;       // Default syslog port is 514
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, syslogServerIP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkErrorLED()
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 // Modbus configurations
@@ -95,6 +95,12 @@ const RegisterRange predefinedRanges[] = {
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
 unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
+
+void blinkErrorLED() {
+    digitalWrite(LED_ERR, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    digitalWrite(LED_ERR, LOW);
+}
 
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
   uint8_t functionCode = data[0];
@@ -389,9 +395,11 @@ void setup() {
   while (!Serial) {
     ; // Wait for Serial to initialize
   }
-  
+
+  pinMode(LED_ERR, OUTPUT);
+  pinMode(LED_TRANS, OUTPUT);
+
   // Initialize WiFi
-  // Initial Wi-Fi connection
   Serial.println("Connecting to Wi-Fi...");
   WiFi.begin(WIFI_SSID, WIFI_PASSWD);
 
