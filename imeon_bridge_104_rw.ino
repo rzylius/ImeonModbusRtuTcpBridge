@@ -110,7 +110,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
 
   switch (functionCode) {
     case 0x03:
-      Serial.printf("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
+      LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
 
     case 0x06: { 
@@ -159,9 +159,9 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       src->unitId              // Unit Identifier
   );
   if (result) {
-      LOG_DEBUG("Success response sent for transaction: %d with result: %d\n", src->transactionId, result);
+      LOG_DEBUG("Success response sent for transaction: %d\n", src->transactionId);
   } else {
-      LOG_ERROR("Failed to send response.");
+      LOG_ERROR("Failed to send TCP response.");
   }
   return Modbus::EX_SUCCESS;
 }
@@ -191,10 +191,8 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
             LOG_ERROR("Connection timeout while transmitting battery data");
             break;
         }
-
         vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
-
     return val;
 }
 
@@ -205,7 +203,7 @@ Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestDa
 
 Modbus::ResultCode cbPostRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
   uint16_t t = millis() - tcpTime;
-  LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
+  //LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
   return Modbus::EX_SUCCESS;
 }
 
@@ -215,7 +213,6 @@ bool cbConn(IPAddress ip) {
   LOG_INFO("TCP client connected %s\n", ip.toString().c_str());;
   return true;
 }
-
 
 void updateTrackingRegisters() {
   // Update metrics and tracking registers
@@ -246,9 +243,8 @@ void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_
   if (xQueueSend(commandQueue, &command, portMAX_DELAY) == pdTRUE) {
     LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
     for (uint16_t i = 0; i < registerCount; i++) {
-        LOG_DEBUG(" 0x%04X", values[i]);
+      LOG_DEBUG(" 0x%04X", values[i]);
     }
-    Serial.println();
   } else {
     Serial.println("Failed to enqueue command.");
     LOG_ERROR("Failed to enqueue command.");
@@ -266,14 +262,12 @@ void manageWiFi() {
         reconnectAttempts = 0; // Reset attempts on successful connection
         return;
     }
-
     Serial.println("Wi-Fi disconnected. Attempting to reconnect...");
-
+    LOG_ERROR("Wi-Fi disconnected. Attempting to reconnect...");
     // Start or continue the reconnection timer
     if (wifiReconnectTimer == 0) {
         wifiReconnectTimer = millis();
     }
-
     unsigned long elapsedTime = millis() - wifiReconnectTimer;
     if (reconnectAttempts < sizeof(reconnectDelay)/sizeof(reconnectDelay[0]) && elapsedTime > reconnectDelay[reconnectAttempts]) {
         WiFi.disconnect();
@@ -297,10 +291,8 @@ void modbusRTU(void* parameter) {
 
   while (true) {
     // Check if it's time to write to registers
-    vTaskDelay(pdMS_TO_TICKS(200));
-    Serial.print(":");
+    vTaskDelay(pdMS_TO_TICKS(100));
     if (!isRtuTransaction && (millis() - lastQueryTime >= QUERY_INTERVAL)) {
-      Serial.println("RTU start read/write");
       // Wait for a command to be available
       isRtuTransaction = true;
       transactionStartTime = millis();
@@ -350,7 +342,6 @@ void modbusRTU(void* parameter) {
           if (roundRobinTime > maxRoundRobinTime) {
             maxRoundRobinTime = roundRobinTime;
           }
-          Serial.printf("Round robin completed, time: %d, maxTime: %d", roundRobinTime, maxRoundRobinTime);
           LOG_INFO("Round robin completed, time: %d, maxTime: %d", roundRobinTime, maxRoundRobinTime);
           startRoundRobinTime = millis();
         }
@@ -405,6 +396,7 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
       Serial.print(".");
       delay(500);
+      blinkErrorLED();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
