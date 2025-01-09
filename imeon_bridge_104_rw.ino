@@ -1,5 +1,4 @@
 #include "secrets.h"
-
 //const char *ssid = "***";
 //const char *password = "***";
 //const char *hostname = "***";
@@ -9,6 +8,9 @@
 #include <ModbusIP_ESP8266.h>
 #include <ModbusMaster.h>
 #include <WiFi.h>
+#include "esp_system.h"           // ESP framework
+#include <esp_task_wdt.h>         // ESP watchdog
+#include <EEPROM.h>               // for storing reboot counter
 
 // ---------------------- Configuration ----------------------
 // Syslog server configuration
@@ -17,6 +19,8 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkErrorLED()
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
+
+
 
 // Modbus configurations
 const uint8_t slaveId = 1;                    // IMEON ModbusRTU Slave ID
@@ -66,6 +70,7 @@ uint16_t roundRobinTime = 0;
 uint16_t maxRoundRobinTime = 0;    // Max time to process all set reads
 uint32_t startRoundRobinTime = 0;      // 
 uint16_t statusWifi = 0;
+uint16_t rebootCounter = 0;
 
 uint32_t tcpTime = 0;
 
@@ -78,6 +83,8 @@ struct RegisterRange {
     uint16_t start;   // Starting register number
     uint16_t length;  // Length of the range
 };
+// registers in decimal and length, which will be queried from IMEON in round robin fashion
+// and stored in mbTcp
 const RegisterRange predefinedRanges[] = {
     {256, 32},
     {512, 22},
@@ -216,19 +223,19 @@ bool cbConn(IPAddress ip) {
 
 void updateTrackingRegisters() {
   // Update metrics and tracking registers
-  mbTcp.Hreg(37100, lowWord(readCount));
-  mbTcp.Hreg(37101, highWord(readCount));
-  mbTcp.Hreg(37102, readError);
-  mbTcp.Hreg(37103, readTime);
-  mbTcp.Hreg(37104, maxReadTime);
-  mbTcp.Hreg(37105, lowWord(writeCount));
-  mbTcp.Hreg(37106, highWord(writeCount));
-  mbTcp.Hreg(37107, writeError);
-  mbTcp.Hreg(37108, writeTime);
-  mbTcp.Hreg(37109, maxWriteTime);
-  mbTcp.Hreg(37110, roundRobinTime);
-  mbTcp.Hreg(37111, maxRoundRobinTime);
-  mbTcp.Hreg(37112, uxQueueMessagesWaiting(commandQueue));
+  mbTcp.Hreg(READ_COUNT_H, highWord(readCount));
+  mbTcp.Hreg(READ_COUNT_L, lowWord(readCount));
+  mbTcp.Hreg(READ_ERROR, readError);
+  mbTcp.Hreg(READ_TIME, readTime);
+  mbTcp.Hreg(MAX_READ_TIME, maxReadTime);
+  mbTcp.Hreg(WRITE_COUNT_H, highWord(writeCount));
+  mbTcp.Hreg(WRITE_COUNT_L, lowWord(writeCount));
+  mbTcp.Hreg(WRITE_ERROR, writeError);
+  mbTcp.Hreg(WRITE_TIME, writeTime);
+  mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
+  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime);
+  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime);
+  mbTcp.Hreg(QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
 }
 
 
