@@ -31,7 +31,9 @@ const uint16_t batNrAddresses = 4;            // Number of battery addresses to 
 ModbusIP mbTcp;
 ModbusMaster mbImeon;
 ModbusIP mbBat;
+
 IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to send battery data
+
 
 // Write Queue Settings
 #define MAX_WRITE_VALUES 15  // Maximum number of registers per command
@@ -178,27 +180,27 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
     uint16_t result = 0;
 
     while (true) {
-        if (mbBat.isConnected(mbBatDestination)) {
-            result = mbBat.pushHreg(mbBatDestination, batStartAddress, batStartAddress, batNrAddresses);
-            mbBat.task();
+      if (mbBat.isConnected(mbBatDestination)) {
+          result = mbBat.pushHreg(mbBatDestination, batStartAddress, batStartAddress, batNrAddresses);
+          mbBat.task();
 
-            if (result) {
-                LOG_INFO("Battery data transmitted successfully");
-                return val;
-            } else {
-                LOG_ERROR("Failed to transmit battery data");
-                break;
-            }
-        } else {
-            mbBat.connect(mbBatDestination);
-        }
+          if (result) {
+              LOG_INFO("Battery data transmitted successfully");
+              return val;
+          } else {
+              LOG_ERROR("Failed to transmit battery data");
+              break;
+          }
+      } else {
+          mbBat.connect(mbBatDestination);
+      }
 
-        // Break the loop if the maximum allowed time is exceeded
-        if (millis() - startTime >= 100) {
-            LOG_ERROR("Connection timeout while transmitting battery data");
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+      // Break the loop if the maximum allowed time is exceeded
+      if (millis() - startTime >= 100) {
+          LOG_ERROR("Connection timeout while transmitting battery data");
+          break;
+      }
+      vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
     return val;
 }
@@ -219,6 +221,18 @@ bool cbConn(IPAddress ip) {
   Serial.printf("TCP client connected %s\n", ip.toString().c_str());
   LOG_INFO("TCP client connected %s\n", ip.toString().c_str());;
   return true;
+}
+
+uint16_t cbRebootCounter(TRegister* reg, uint16_t val) {
+  // reset counter if REBOOT_COUNTER hreg set to 0
+  if (val == 0) {
+    rebootCounter == 0;
+    EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
+    EEPROM.commit();  // Commit the changes to EEPROM (save them!)
+  } else {
+    val = rebootCounter; // if mbTcp sets value non zero, ignore it
+  }
+  return val;
 }
 
 void updateTrackingRegisters() {
@@ -383,7 +397,6 @@ void modbusRTU(void* parameter) {
   }
 }
 
-
 void setup() {
     // Initialize Serial for debugging
   Serial.begin(115200);
@@ -391,6 +404,14 @@ void setup() {
     ; // Wait for Serial to initialize
   }
 
+  // EEPROM reboot counter
+  EEPROM.begin(512); // Allocate 512 bytes of EEPROM (adjust if needed)
+  rebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS); // Read the reboot counter from EEPROM
+  rebootCounter++; // Increment the counter
+  EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
+  EEPROM.commit();  // Commit the changes to EEPROM (save them!)
+
+  // initialize LEDS
   pinMode(LED_ERR, OUTPUT);
   pinMode(LED_TRANS, OUTPUT);
 
@@ -433,10 +454,13 @@ void setup() {
       mbTcp.addHreg(reg, 0); // add each register 
     }
   }
-  for (uint16_t i = 37100; i <= 37115; i++) {
+  for (uint16_t i = 37100; i <= 37125; i++) {
     mbTcp.addHreg(i, 0);
   }
-  mbTcp.onSetHreg(771, cbBat);
+  // only three battery values are considered for battery balance assessment
+  // so callback is triggered when third value is set
+  mbTcp.onSetHreg(batStartAddress + 3, cbBat); 
+  mbTcp.onSetHreg(REBOOT_COUNTER, cbRebootCounter); // capture when to reset counter
 
   // Initialize the command queue
   commandQueue = xQueueCreate(QUEUE_LENGTH, sizeof(WriteCommand));

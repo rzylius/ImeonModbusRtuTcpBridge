@@ -20,8 +20,11 @@
 #define MAX_WRITE_TIME 37109
 #define ROUND_ROBIN_TIME 37110
 #define MAX_ROUND_ROBIN_TIME 37111
+// modbusRTU write commands standing in queue
 #define QUEUE_SIZE 37120
+// counter for monitoring reboots. resets when you set it to zero
 #define REBOOT_COUNTER 37121
 
+#define EEPROM_REBOOT_COUNTER_ADDRESS 0
 
 #endif
