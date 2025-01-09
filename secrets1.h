@@ -8,6 +8,7 @@
 #define SYSLOG_SERVER_IP "10.0.20.1"
 
 // mbTcp performance monitoring registers
+// all times (except max round robin) in in ms
 #define READ_COUNT_H 37100
 #define READ_COUNT_L 37101
 #define READ_ERROR 37102
@@ -19,7 +20,8 @@
 #define WRITE_TIME 37108
 #define MAX_WRITE_TIME 37109
 #define ROUND_ROBIN_TIME 37110
-#define MAX_ROUND_ROBIN_TIME 37111
+
+#define MAX_ROUND_ROBIN_TIME 37111  // in seconds
 // modbusRTU write commands standing in queue
 #define QUEUE_SIZE 37120
 // counter for monitoring reboots. resets when you set it to zero

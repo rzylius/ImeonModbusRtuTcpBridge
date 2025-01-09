@@ -248,7 +248,7 @@ void updateTrackingRegisters() {
   mbTcp.Hreg(WRITE_TIME, writeTime);
   mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
   mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime);
-  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime);
+  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
   mbTcp.Hreg(QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
 }
 
