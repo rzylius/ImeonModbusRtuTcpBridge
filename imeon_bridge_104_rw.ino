@@ -77,8 +77,8 @@ uint16_t rebootCounter = 0;
 uint32_t tcpTime = 0;
 
 // LED pin definitions
-#define LED_TRANS 2   // Transaction LED
-#define LED_ERR 4     // Error LED
+#define LED_TRANS 26   // Transaction LED
+#define LED_ERR 33     // Error LED
 
 // Predefined ranges
 struct RegisterRange {
