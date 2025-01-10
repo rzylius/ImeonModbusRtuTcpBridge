@@ -76,10 +76,6 @@ uint16_t rebootCounter = 0;
 
 uint32_t tcpTime = 0;
 
-// LED pin definitions
-#define LED_TRANS 26   // Transaction LED
-#define LED_ERR 33     // Error LED
-
 // Predefined ranges
 struct RegisterRange {
     uint16_t start;   // Starting register number
@@ -88,15 +84,15 @@ struct RegisterRange {
 // registers in decimal and length, which will be queried from IMEON in round robin fashion
 // and stored in mbTcp
 const RegisterRange predefinedRanges[] = {
-    {256, 32},
+    {256, 30},
     {512, 22},
-    {768, 8},
-    {1024, 20},
-    {1283, 8},
-    {4096, 8},
-    {4352, 8},
+    {768, 4},
+    {1024, 16},
+    {1283, 6},
+    {4096, 5},
+    {4352, 2},
     {4864, 18},
-    {4899, 4},
+    {4899, 1},
     {5125, 8}
 };
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array

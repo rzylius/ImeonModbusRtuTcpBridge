@@ -7,6 +7,10 @@
 #define SYSLOG_NAME "SSS"
 #define SYSLOG_SERVER_IP "10.0.20.1"
 
+// LED pin definitions
+#define LED_TRANS 26   // Transaction LED
+#define LED_ERR 33     // Error LED
+
 // mbTcp performance monitoring registers
 // all times (except max round robin) in in ms
 #define READ_COUNT_H 37100
@@ -26,7 +30,6 @@
 #define QUEUE_SIZE 37120
 // counter for monitoring reboots. resets when you set it to zero
 #define REBOOT_COUNTER 37121
-
 #define EEPROM_REBOOT_COUNTER_ADDRESS 0
 
 #endif
