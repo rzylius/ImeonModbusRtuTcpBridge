@@ -31,13 +31,23 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 
 ## Implementation 
 
-I found that https://github.com/emelianov/modbus-esp8266/ does not handle well modbusRTU timeouts with IMEON, so for modbusRTU I use modbusMaster library
+I found that https://github.com/emelianov/modbus-esp8266/ does not handle well modbusRTU timeouts with IMEON, so for modbusRTU I use modbusMaster library.
+
+During testing I gather, that long modbusRTU timeouts interfere with the modbusTCP requests.
+So I implement the following
+
+* modbusRTU process is set to work on core1
+* all other processes are set to work on core0
+So when sketch is uploaded, in Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
 
 
 ## Installation
 
 secrets.h file is under .gitignore
 So rename secrets1.h to secrets.h and set the right settings
+
+In Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
+
 
 You can monitor the ESP32's activity through the Serial Monitor and check the logs on your Syslog server.
 
