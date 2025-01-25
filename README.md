@@ -4,6 +4,7 @@
 This project implements an ESP32-based Modbus gateway that facilitates communication between a Modbus TCP network and a Modbus RTU device (specifically an IMEON solar inverter).
 IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement sunchronuous RTU-TCP bridge (in this case your TCP requests would experience the same 10sec timeouts).
 
+
 ## Logic
 - rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32. If delay between requests are 1 sec, my round of reads is completed in ~16secs.
   You can adjust timing between reads with QUERY_INTERVAL
@@ -12,11 +13,13 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 - esp32 processes the write queue as priority - - reading stops until all write queue is empty
 - if write requests fails, write request is written in the write queue again
 
+
 ## Features
 
 * **Metrics Tracking:**  Monitors and stores performance metrics such as read/write counts, errors, and timing information, accessible via Modbus registers.
 * **Syslog Integration:**  Utilizes Syslog for logging events and errors to a remote server for debugging and monitoring.
 * **WiFi Reconnection:**  Includes a mechanism to automatically reconnect to Wi-Fi in case of disconnection.
+
 
 ## Hardware Requirements
 
@@ -25,14 +28,8 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 * IMEON solar inverter with Modbus RTU interface
 * (Optional)  Syslog server
 
-## Software Requirements
 
-* Arduino IDE
-* ESP32 board support package
-* Libraries:
-    * SimpleSyslog
-    * ModbusIP_ESP8266
-    * ModbusMaster
+## Implementation 
 
 I found that https://github.com/emelianov/modbus-esp8266/ does not handle well modbusRTU timeouts with IMEON, so for modbusRTU I use modbusMaster library
 
@@ -43,6 +40,7 @@ secrets.h file is under .gitignore
 So rename secrets1.h to secrets.h and set the right settings
 
 You can monitor the ESP32's activity through the Serial Monitor and check the logs on your Syslog server.
+
 
 ## Contributing
 
