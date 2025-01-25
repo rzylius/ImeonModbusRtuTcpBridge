@@ -6,11 +6,12 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 
 
 ## Logic
-- rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32. If delay between requests are 1 sec, my round of reads is completed in ~16secs.
+- rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32.
+  When delay between requests is set to 1 sec, my round of reads is completed in ~16secs.
   You can adjust timing between reads with QUERY_INTERVAL
-- TCP requests are answered instantly by esp32 (they may hold data read 10-16 secs ago).
-- TCP write requests receive immediate response SUCCESS, and stored in the queue
-- esp32 processes the write queue as priority - - reading stops until all write queue is empty
+- TCP requests are answered instantly by esp32 (local registers are updated by read routine).
+- TCP write requests receive immediate response SUCCESS, and are stored in the write queue
+- esp32 processes the write queue as priority - - reading stops until write queue is empty
 - if write requests fails, write request is written in the write queue again
 
 
@@ -23,7 +24,7 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 
 ## Hardware Requirements
 
-* ESP32 development board
+* ESP32 (wroom or s3) development board
 * TTL-RS485 board (I tested only with automatic flow control)
 * IMEON solar inverter with Modbus RTU interface
 * (Optional)  Syslog server
@@ -38,7 +39,8 @@ So I implement the following
 
 * modbusRTU process is set to work on core1
 * all other processes are set to work on core0
-So when sketch is uploaded, in Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
+
+For this before sketch is uploaded, in Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
 
 
 ## Installation
