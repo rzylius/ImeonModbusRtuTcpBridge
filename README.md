@@ -1,8 +1,10 @@
 ```markdown
 # ESP32 Modbus RTU-TCP Gateway for IMEON 9.12
 
-This project implements an ESP32-based Modbus gateway that facilitates communication between a Modbus TCP network and a Modbus RTU device (specifically an IMEON solar inverter).
-IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement sunchronuous RTU-TCP bridge (in this case your TCP requests would experience the same 10sec timeouts).
+This project implements an ESP32-based Modbus gateway that facilitates communication between a Modbus TCP network
+and a Modbus RTU device (specifically an IMEON solar inverter).
+IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement sunchronuous RTU-TCP bridge
+(in this case your TCP requests would experience the same 10sec timeouts).
 
 
 ## Logic
@@ -17,8 +19,10 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 
 ## Features
 
-* **Metrics Tracking:**  Monitors and stores performance metrics such as read/write counts, errors, and timing information, accessible via Modbus registers.
-* **Syslog Integration:**  Utilizes Syslog for logging events and errors to a remote server for debugging and monitoring.
+* **Metrics Tracking:**  Monitors and stores performance metrics such as read/write counts, errors,
+    and timing information, accessible via Modbus registers.
+* **Syslog Integration:**  Utilizes Syslog for logging events and errors to a remote server
+    for debugging and monitoring.
 * **WiFi Reconnection:**  Includes a mechanism to automatically reconnect to Wi-Fi in case of disconnection.
 
 
@@ -32,7 +36,8 @@ IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 
 ## Implementation 
 
-I found that https://github.com/emelianov/modbus-esp8266/ does not handle well modbusRTU timeouts with IMEON, so for modbusRTU I use modbusMaster library.
+I found that https://github.com/emelianov/modbus-esp8266/ does not handle well modbusRTU timeouts with IMEON,
+so for modbusRTU I use modbusMaster library.
 
 During testing I gather, that long modbusRTU timeouts interfere with the modbusTCP requests.
 So I implement the following
@@ -56,7 +61,8 @@ You can monitor the ESP32's activity through the Serial Monitor and check the lo
 
 ## Contributing
 
-Contributions are welcome! Feel free to open issues or submit pull requests for bug fixes, improvements, or new features.
+Contributions are welcome! Feel free to open issues or submit pull requests for bug fixes,
+improvements, or new features.
 
 ```
 
