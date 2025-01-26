@@ -1,10 +1,11 @@
 ```markdown
 # ESP32 Modbus RTU-TCP Gateway for IMEON 9.12
 
-This project implements an ESP32-based Modbus gateway that facilitates communication between a Modbus TCP network
-and a Modbus RTU device (specifically an IMEON solar inverter).
-IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement sunchronuous RTU-TCP bridge
-(in this case your TCP requests would experience the same 10sec timeouts).
+This project implements an ESP32-based Modbus gateway that facilitates communication
+between a Modbus TCP network and a Modbus RTU device (specifically an IMEON solar inverter).
+IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
+synchronuous RTU-TCP bridge (as in this case your TCP requests would experience
+the same 10sec timeouts).
 
 
 ## Logic
