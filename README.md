@@ -9,10 +9,11 @@ the same 10sec timeouts).
 
 
 ## Logic
-- rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32.
-  When delay between requests is set to 1 sec, my round of reads is completed in ~16secs.
+- rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32
+  local registers. When delay between requests is set to 1 sec, my round of reads is completed in ~16secs.
   You can adjust timing between reads with QUERY_INTERVAL
-- TCP requests are answered instantly by esp32 (local registers are updated by read routine).
+- TCP requests are answered instantly by esp32 from local registers
+  (local registers are updated by read routine).
 - TCP write requests receive immediate response SUCCESS, and are stored in the write queue
 - esp32 processes the write queue as priority - - reading stops until write queue is empty
 - if write requests fails, write request is written in the write queue again
