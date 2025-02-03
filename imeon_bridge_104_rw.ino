@@ -15,7 +15,7 @@
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkErrorLED()
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 // Modbus configurations
@@ -158,6 +158,12 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       LOG_ERROR("Failed to send response.");
   }
   return Modbus::EX_SUCCESS;
+}
+
+void blinkErrorLED() {
+    digitalWrite(LED_ERR, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    digitalWrite(LED_ERR, LOW);
 }
 
 uint16_t cbBat(TRegister* reg, uint16_t val) {
@@ -408,6 +414,9 @@ void setup() {
   }
 
   wifiReconnectTimer = millis(); // Initialize the reconnection timer
+
+  pinMode(LED_ERR, OUTPUT);
+  pinMode(LED_TRANS, OUTPUT);
   
   // Initialize Modbus
   mbTcp.onConnect(cbConn);
