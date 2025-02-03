@@ -21,12 +21,6 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 
-
-// Modbus configurations
-const uint8_t slaveId = 1;                    // IMEON ModbusRTU Slave ID
-const uint16_t batStartAddress = 768;         // Start address for battery registers
-const uint16_t batNrAddresses = 4;            // Number of battery addresses to process
-
 // Define Modbus instances
 ModbusIP mbTcp;
 ModbusMaster mbImeon;
@@ -46,7 +40,6 @@ QueueHandle_t commandQueue;  // Queue handle
 
 //--------wifi
 unsigned long wifiReconnectTimer = 0;   // Timer for reconnection attempts
-const unsigned long maxReconnectTime = 30000; // Maximum reconnection time (30 seconds)
 
 // Flags and timing variables for asynchronous processing
 bool isRtuTransaction = false;
@@ -167,7 +160,7 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
 
     while (true) {
       if (mbBat.isConnected(mbBatDestination)) {
-          result = mbBat.pushHreg(mbBatDestination, batStartAddress, batStartAddress, batNrAddresses);
+          result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
           mbBat.task();
 
           if (result) {
@@ -299,8 +292,9 @@ void modbusRTU(void* parameter) {
   while (true) {
     // Check if it's time to write to registers
     vTaskDelay(pdMS_TO_TICKS(100));
-    if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
+    if (!isRtuTransaction && (millis() - lastQueryTime >= 1000)) {
       // Wait for a command to be available
+      Serial.print(":");
       isRtuTransaction = true;
       transactionStartTime = millis();
       if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
@@ -364,7 +358,7 @@ void modbusRTU(void* parameter) {
             maxReadTime = readTime;
           }
           LOG_DEBUG("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
-          Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
+          Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d\n", reg, reg, length, readTime);
           // Iterate through the response and print register values
           for (uint16_t i = 0; i < length; i++) {
             uint16_t value = mbImeon.getResponseBuffer(i);
@@ -440,7 +434,7 @@ void setup() {
   }
   // only three battery values are considered for battery balance assessment
   // so callback is triggered when third value is set
-  mbTcp.onSetHreg(batStartAddress + 3, cbBat); 
+  mbTcp.onSetHreg(BAT_START_ADDRESS + 3, cbBat); 
   mbTcp.onSetHreg(REBOOT_COUNTER, cbRebootCounter); // capture when to reset counter
 
   // Initialize the command queue
