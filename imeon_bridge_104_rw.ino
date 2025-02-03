@@ -17,7 +17,7 @@
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkErrorLED()
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 
@@ -34,9 +34,7 @@ ModbusIP mbBat;
 
 IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to send battery data
 
-
 // Write Queue Settings
-#define MAX_WRITE_VALUES 15  // Maximum number of registers per command
 struct WriteCommand {
     uint16_t address;            // Register starting address
     uint16_t length;             // Number of registers to write
@@ -44,7 +42,6 @@ struct WriteCommand {
 };
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
-#define QUEUE_LENGTH 10  // Maximum number of commands in the queue
 QueueHandle_t commandQueue;  // Queue handle
 
 //--------wifi
@@ -55,7 +52,6 @@ const unsigned long maxReconnectTime = 30000; // Maximum reconnection time (30 s
 bool isRtuTransaction = false;
 unsigned long transactionStartTime = 0;
 unsigned long nextProcessTime = 0;
-const unsigned long QUERY_INTERVAL = 1000; // time between rtu transactions
 unsigned long lastQueryTime = 0;
 
 // Metrics tracking variables
@@ -98,12 +94,6 @@ const RegisterRange predefinedRanges[] = {
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
 unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
-
-void blinkErrorLED() {
-    digitalWrite(LED_ERR, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    digitalWrite(LED_ERR, LOW);
-}
 
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
   uint8_t functionCode = data[0];
@@ -245,7 +235,7 @@ void updateTrackingRegisters() {
   mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
   mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime);
   mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
-  mbTcp.Hreg(QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
+  mbTcp.Hreg(WRITE_QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
 }
 
 
@@ -309,7 +299,7 @@ void modbusRTU(void* parameter) {
   while (true) {
     // Check if it's time to write to registers
     vTaskDelay(pdMS_TO_TICKS(100));
-    if (!isRtuTransaction && (millis() - lastQueryTime >= QUERY_INTERVAL)) {
+    if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       // Wait for a command to be available
       isRtuTransaction = true;
       transactionStartTime = millis();
@@ -407,10 +397,6 @@ void setup() {
   EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
   EEPROM.commit();  // Commit the changes to EEPROM (save them!)
 
-  // initialize LEDS
-  pinMode(LED_ERR, OUTPUT);
-  pinMode(LED_TRANS, OUTPUT);
-
   // Initialize WiFi
   Serial.println("Connecting to Wi-Fi...");
   WiFi.begin(WIFI_SSID, WIFI_PASSWD);
@@ -420,7 +406,6 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
       Serial.print(".");
       delay(500);
-      blinkErrorLED();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -439,8 +424,8 @@ void setup() {
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
   
-  Serial2.begin(9600, SERIAL_8N1, 16, 17); // RX = 16, TX = 17
-  mbImeon.begin(1, Serial2);
+  Serial2.begin(9600, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
+  mbImeon.begin(MODBUS_RTU_ID, Serial2);
 
   // Iterate through each range and print all individual registers
   for (int i = 0; i < rangeCount; ++i) {
@@ -459,7 +444,7 @@ void setup() {
   mbTcp.onSetHreg(REBOOT_COUNTER, cbRebootCounter); // capture when to reset counter
 
   // Initialize the command queue
-  commandQueue = xQueueCreate(QUEUE_LENGTH, sizeof(WriteCommand));
+  commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   if (commandQueue == NULL) {
       Serial.println("Error: Failed to create commandQueue.");
       // Handle the error appropriately, possibly by restarting the ESP32
