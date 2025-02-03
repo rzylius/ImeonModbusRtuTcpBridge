@@ -291,12 +291,13 @@ void modbusRTU(void* parameter) {
 
   while (true) {
     // Check if it's time to write to registers
-    vTaskDelay(pdMS_TO_TICKS(100));
-    if (!isRtuTransaction && (millis() - lastQueryTime >= 1000)) {
-      // Wait for a command to be available
-      Serial.print(":");
+    vTaskDelay(pdMS_TO_TICKS(200));
+    // test if enough time passeed after the last modbusRTU transaction
+    if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       isRtuTransaction = true;
       transactionStartTime = millis();
+
+      // true if there is commands in write queue
       if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
         // Log command details
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
@@ -331,8 +332,8 @@ void modbusRTU(void* parameter) {
           writeError++;
           // Re-enqueue the failed command
           enqueueWriteCommand(command.address, command.length, command.values); // Use enqueueWriteCommand here
-          }
         }
+        
       } else {
         // when writeQueue is empty go on reading registers
         // select next range of registers to read
@@ -369,10 +370,11 @@ void modbusRTU(void* parameter) {
           // Handle errors
           LOG_ERROR("ReadRTU error: reg %d, length: %d, result: %02X\n", reg, length, result);
           readError++;
-      }
+        }
       lastQueryTime = millis();
       isRtuTransaction = false;
       updateTrackingRegisters();
+      }
     }
   }
 }
