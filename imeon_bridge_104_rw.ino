@@ -7,6 +7,8 @@
 #include "esp_system.h"           // ESP framework
 #include <esp_task_wdt.h>         // ESP watchdog
 #include <EEPROM.h>               // for storing reboot counter
+#include <freertos/FreeRTOS.h>    // for multitasking on dedicated cores
+#include <freertos/queue.h>       // write queue management
 
 // ---------------------- Configuration ----------------------
 // Syslog server configuration
@@ -29,8 +31,6 @@ struct WriteCommand {
     uint16_t length;             // Number of registers to write
     uint16_t values[MAX_WRITE_VALUES];  // Raw register values (each register is 2 bytes)
 };
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
 
 QueueHandle_t commandQueue;  // Queue handle
 
