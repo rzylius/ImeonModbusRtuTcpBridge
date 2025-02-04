@@ -60,6 +60,23 @@ In Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
 
 You can monitor the ESP32's activity through the Serial Monitor and check the logs on your Syslog server.
 
+## Peculiarities of IMEON
+
+Overall modbusRTU is pretty reliable.
+
+My most operational scenarios:
+- discharge to grid
+- discharge to loads,
+- battery stay idle
+- charge batteries
+
+Are done via settings of registry 0x1306.
+But sometimes "Charge battery from grid" does not work. I did not find on what it depends.
+As a workaround I have script in openhab, which checks if Charge from grid selected and battery is not charging,
+then it 0x1323 value 2 to switch to backup mode. Then it charges all right. (remember to switch back to smartgrid which is value 1).
+
+When switching between modes, the max charge / max discharge settings are reset. So I have virtual items in openhab which
+hold max charge / discharge settings, and periodically check if these value are set on IMEON. And update if they do not match.
 
 ## Contributing
 
