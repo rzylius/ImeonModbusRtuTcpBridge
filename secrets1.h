@@ -18,6 +18,7 @@
 #define LED_ERR 33     // Error LED
 #define PIN_RX 16       /// PINs for TTL-rs485
 #define PIN_TX 17
+#define BAUD_RATE 9600
 
 #define MODBUS_RTU_ID 1
 #define READ_QUERY_INTERVAL 1000  // milisecs between reads of modbusRTU

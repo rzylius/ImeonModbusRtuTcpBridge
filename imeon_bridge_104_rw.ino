@@ -1,8 +1,4 @@
 #include "secrets.h"
-//const char *ssid = "***";
-//const char *password = "***";
-//const char *hostname = "***";
-//const char *syslog_name = "***";
 
 #include <SimpleSyslog.h>
 #include <ModbusIP_ESP8266.h>
@@ -17,9 +13,8 @@
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkLED(LED_ERR)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
-
 
 // Define Modbus instances
 ModbusIP mbTcp;
@@ -36,6 +31,7 @@ struct WriteCommand {
 };
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+
 QueueHandle_t commandQueue;  // Queue handle
 
 //--------wifi
@@ -89,6 +85,7 @@ unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
 
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
+  blinkLED(LED_TRANS);
   uint8_t functionCode = data[0];
   auto src = (Modbus::frame_arg_t*) custom;
   uint16_t transactionId = src->transactionId;
@@ -154,25 +151,40 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   return Modbus::EX_SUCCESS;
 }
 
+void blinkLED(int led) {
+    digitalWrite(led, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    digitalWrite(led, LOW);
+}
+
+// callback to send info about battery to modbusTCP server 
+// I use it to send to esp32 controller which reads smartmeter readinngs
+// and answers requests from heatpump
 uint16_t cbBat(TRegister* reg, uint16_t val) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
     while (true) {
-      if (mbBat.isConnected(mbBatDestination)) {
-          result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
-          mbBat.task();
+        if (mbBat.isConnected(mbBatDestination)) {
+            result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
+            mbBat.task();
 
-          if (result) {
-              LOG_INFO("Battery data transmitted successfully");
-              return val;
-          } else {
-              LOG_ERROR("Failed to transmit battery data");
-              break;
-          }
-      } else {
-          mbBat.connect(mbBatDestination);
-      }
+            if (result) {
+                LOG_INFO("Battery data transmitted successfully");
+                return val;
+            } else {
+                LOG_ERROR("Failed to transmit battery data");
+                break;
+            }
+        } else {
+            mbBat.connect(mbBatDestination);
+        }
+
+        // Break the loop if the maximum allowed time is exceeded
+        if (millis() - startTime >= 100) {
+            LOG_ERROR("Connection timeout while transmitting battery data");
+            break;
+        }
 
       // Break the loop if the maximum allowed time is exceeded
       if (millis() - startTime >= 100) {
@@ -226,11 +238,10 @@ void updateTrackingRegisters() {
   mbTcp.Hreg(WRITE_ERROR, writeError);
   mbTcp.Hreg(WRITE_TIME, writeTime);
   mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
-  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime);
+  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
   mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
   mbTcp.Hreg(WRITE_QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
 }
-
 
 //----------------------Queue commands-------------------------------------------
 void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values) {
@@ -281,8 +292,6 @@ void manageWiFi() {
         delay(1000); // Allow time for the log message to be sent
         ESP.restart(); // Reboot the ESP32
     }
-
-    // Optional: Add a cap to prevent too many attempts
 }
 
 void modbusRTU(void* parameter) {
@@ -290,16 +299,16 @@ void modbusRTU(void* parameter) {
   uint8_t result = 0;
 
   while (true) {
-    // Check if it's time to write to registers
     vTaskDelay(pdMS_TO_TICKS(200));
-    // test if enough time passeed after the last modbusRTU transaction
+
+    // check if time has passed for next modbusRTU transaction
     if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       isRtuTransaction = true;
       transactionStartTime = millis();
 
-      // true if there is commands in write queue
+      // check if anything sits in write_queue
       if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
-        // Log command details
+        // process write request
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
                       command.address, command.length);
         LOG_INFO("  DEQ: Processing: Address=0x%04X %d, RegNum=%d, Val(s)",
@@ -312,7 +321,7 @@ void modbusRTU(void* parameter) {
         }
         Serial.printf("\n");
 
-        // Multiple registers write (Function Code 0x10)
+        // Multiple registers write (Function Code 0x10), my testing shows that single register write 0x06 does not work
         result = mbImeon.writeMultipleRegisters(command.address, command.length);
         
         // Check the result
@@ -333,9 +342,9 @@ void modbusRTU(void* parameter) {
           // Re-enqueue the failed command
           enqueueWriteCommand(command.address, command.length, command.values); // Use enqueueWriteCommand here
         }
-        
+
+      // if there is nothing in write_queue, proceed with next read  
       } else {
-        // when writeQueue is empty go on reading registers
         // select next range of registers to read
         RegisterRange currentRange = predefinedRanges[currentRangeIndex];
         currentRangeIndex = (currentRangeIndex + 1) % rangeCount; // roll register
@@ -371,6 +380,8 @@ void modbusRTU(void* parameter) {
           LOG_ERROR("ReadRTU error: reg %d, length: %d, result: %02X\n", reg, length, result);
           readError++;
         }
+      }
+      // finish modbusRTU transaction
       lastQueryTime = millis();
       isRtuTransaction = false;
       updateTrackingRegisters();
@@ -411,16 +422,19 @@ void setup() {
   }
 
   wifiReconnectTimer = millis(); // Initialize the reconnection timer
+
+  pinMode(LED_ERR, OUTPUT);
+  pinMode(LED_TRANS, OUTPUT);
   
   // Initialize Modbus
   mbTcp.onConnect(cbConn);
   mbTcp.onRequest(cbPreRequest);
   mbTcp.onRequestSuccess(cbPostRequest);
-  mbTcp.onRaw(onModbusRequest);
+  mbTcp.onRaw(onModbusRequest);           // capture all modbusTCP requests and process in callback
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
   
-  Serial2.begin(9600, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
+  Serial2.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
   mbImeon.begin(MODBUS_RTU_ID, Serial2);
 
   // Iterate through each range and print all individual registers
@@ -431,19 +445,18 @@ void setup() {
       mbTcp.addHreg(reg, 0); // add each register 
     }
   }
-  for (uint16_t i = 37100; i <= 37125; i++) {
+
+  for (uint16_t i = READ_COUNT_H; i <= REBOOT_COUNTER; i++) {
     mbTcp.addHreg(i, 0);
   }
-  // only three battery values are considered for battery balance assessment
-  // so callback is triggered when third value is set
-  mbTcp.onSetHreg(BAT_START_ADDRESS + 3, cbBat); 
-  mbTcp.onSetHreg(REBOOT_COUNTER, cbRebootCounter); // capture when to reset counter
+  mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
 
+  
   // Initialize the command queue
   commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   if (commandQueue == NULL) {
       Serial.println("Error: Failed to create commandQueue.");
-      // Handle the error appropriately, possibly by restarting the ESP32
+      // Handle the error  by restarting the ESP32
       ESP.restart();
   } else {
       Serial.println("commandQueue successfully created.");
@@ -459,12 +472,6 @@ void setup() {
       1                                 // Core ID (0 for core 0)
   );
 
-  // Example: Enqueue a few commands
-  //uint8_t values1[] = {0x12, 0x34, 0x56, 0x78};  // Two registers (0x1234, 0x5678)
-  //enqueueWriteCommand(0x0010, 4, values1);
-
-  //uint8_t values2[] = {0x9A, 0xBC};  // One register (0x9ABC)
-  //enqueueWriteCommand(0x0020, 2, values2);
 }
 
 void loop() {
