@@ -385,7 +385,6 @@ void modbusRTU(void* parameter) {
       lastQueryTime = millis();
       isRtuTransaction = false;
       updateTrackingRegisters();
-      }
     }
   }
 }
