@@ -104,6 +104,12 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       enqueueWriteCommand(address, 1, &singleRegValue);
       LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
+      
+      mbTcp.Hreg(address, UNDEF_VALUE);
+      if (address == 4870) {
+        mbTcp.Coil(PWR_ADDRESS, 0);
+      }
+      
       break;
     }
 
@@ -155,6 +161,15 @@ void blinkLED(int led) {
     digitalWrite(led, HIGH);
     vTaskDelay(pdMS_TO_TICKS(50));
     digitalWrite(led, LOW);
+}
+
+// transform 0x1306 to coils
+uint16_t cb0x1306(TRegister* reg, uint16_t val) {
+  for (uint8_t bit = 8; bit < 16; bit++) {
+    bool bit_value = (val & (1 << bit)) != 0; // Extract bit 8 to 15 as boolean
+    mbTcp.Coil(PWR_ADDRESS + bit, bit_value); // Assign to coil indexes 0 to 7
+  }
+  mbTcp.Coil(PWR_ADDRESS, 1);
 }
 
 // callback to send info about battery to modbusTCP server 
@@ -451,6 +466,11 @@ void setup() {
     mbTcp.addHreg(i, 0);
   }
   mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
+
+  for (int i = 0; i < 16; ++i) {
+    mbTcp.addCoil(PWR_ADDRESS + i, 0);
+  }
+  mbTcp.onSetHreg(4870, cb0x1306);
 
   
   // Initialize the command queue
