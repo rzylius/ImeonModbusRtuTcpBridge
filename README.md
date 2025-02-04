@@ -1,4 +1,14 @@
 ```markdown
+
+
+## Why modbus?
+
+IMEON released json management protocol implemented on ethernet. But it has limited functionality
+in comparison to modbus (e.g. json can not command to discharge battery to grid, etc.)
+
+So it seems modbus implementation is more versatile and reliable.
+
+
 # ESP32 Modbus RTU-TCP Gateway for IMEON 9.12
 
 This project implements an ESP32-based Modbus gateway that facilitates communication
@@ -6,7 +16,6 @@ between a Modbus TCP network and a Modbus RTU device (specifically an IMEON sola
 IMEON inverter has a RTU timeout of 10sec, so I find it not optimal to implement
 synchronuous RTU-TCP bridge (as in this case your TCP requests would experience
 the same 10sec timeouts).
-
 
 ## Logic
 - rotates predefined list of registers/length reads them from IMEON RTU and stores in esp32
@@ -16,7 +25,7 @@ the same 10sec timeouts).
   (local registers are updated by read routine).
 - TCP write requests receive immediate response SUCCESS, and are stored in the write queue
 - esp32 processes the write queue as priority - - reading stops until write queue is empty
-- if write requests fails, write request is written in the write queue again
+- if write requests fails, write request is written in the write queue again (tbd)
 
 
 ## Features
