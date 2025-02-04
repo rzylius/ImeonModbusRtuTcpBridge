@@ -4,6 +4,9 @@
 #include <ModbusIP_ESP8266.h>
 #include <ModbusMaster.h>
 #include <WiFi.h>
+#include "esp_system.h"           // ESP framework
+#include <esp_task_wdt.h>         // ESP watchdog
+#include <EEPROM.h>               // for storing reboot counter
 
 // ---------------------- Configuration ----------------------
 // Syslog server configuration
@@ -17,6 +20,7 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 ModbusIP mbTcp;
 ModbusMaster mbImeon;
 ModbusIP mbBat;
+
 IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to send battery data
 
 // Write Queue Settings
@@ -53,6 +57,7 @@ uint16_t roundRobinTime = 0;
 uint16_t maxRoundRobinTime = 0;    // Max time to process all set reads
 uint32_t startRoundRobinTime = 0;      // 
 uint16_t statusWifi = 0;
+uint16_t rebootCounter = 0;
 
 uint32_t tcpTime = 0;
 
@@ -61,6 +66,8 @@ struct RegisterRange {
     uint16_t start;   // Starting register number
     uint16_t length;  // Length of the range
 };
+// registers in decimal and length, which will be queried from IMEON in round robin fashion
+// and stored in mbTcp
 const RegisterRange predefinedRanges[] = {
     {256, 30},
     {512, 22},
@@ -88,7 +95,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
 
   switch (functionCode) {
     case 0x03:
-      Serial.printf("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
+      LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
 
     case 0x06: { 
@@ -137,9 +144,9 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       src->unitId              // Unit Identifier
   );
   if (result) {
-      LOG_DEBUG("Success response sent for transaction: %d with result: %d\n", src->transactionId, result);
+      LOG_DEBUG("Success response sent for transaction: %d\n", src->transactionId);
   } else {
-      LOG_ERROR("Failed to send response.");
+      LOG_ERROR("Failed to send TCP response.");
   }
   return Modbus::EX_SUCCESS;
 }
@@ -179,9 +186,13 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
             break;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+      // Break the loop if the maximum allowed time is exceeded
+      if (millis() - startTime >= 100) {
+          LOG_ERROR("Connection timeout while transmitting battery data");
+          break;
+      }
+      vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
-
     return val;
 }
 
@@ -192,7 +203,7 @@ Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestDa
 
 Modbus::ResultCode cbPostRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
   uint16_t t = millis() - tcpTime;
-  LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
+  //LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
   return Modbus::EX_SUCCESS;
 }
 
@@ -203,6 +214,17 @@ bool cbConn(IPAddress ip) {
   return true;
 }
 
+uint16_t cbRebootCounter(TRegister* reg, uint16_t val) {
+  // reset counter if REBOOT_COUNTER hreg set to 0
+  if (val == 0) {
+    rebootCounter == 0;
+    EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
+    EEPROM.commit();  // Commit the changes to EEPROM (save them!)
+  } else {
+    val = rebootCounter; // if mbTcp sets value non zero, ignore it
+  }
+  return val;
+}
 
 void updateTrackingRegisters() {
   // Update metrics and tracking registers
@@ -232,9 +254,8 @@ void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_
   if (xQueueSend(commandQueue, &command, portMAX_DELAY) == pdTRUE) {
     LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
     for (uint16_t i = 0; i < registerCount; i++) {
-        LOG_DEBUG(" 0x%04X", values[i]);
+      LOG_DEBUG(" 0x%04X", values[i]);
     }
-    Serial.println();
   } else {
     Serial.println("Failed to enqueue command.");
     LOG_ERROR("Failed to enqueue command.");
@@ -252,14 +273,12 @@ void manageWiFi() {
         reconnectAttempts = 0; // Reset attempts on successful connection
         return;
     }
-
     Serial.println("Wi-Fi disconnected. Attempting to reconnect...");
-
+    LOG_ERROR("Wi-Fi disconnected. Attempting to reconnect...");
     // Start or continue the reconnection timer
     if (wifiReconnectTimer == 0) {
         wifiReconnectTimer = millis();
     }
-
     unsigned long elapsedTime = millis() - wifiReconnectTimer;
     if (reconnectAttempts < sizeof(reconnectDelay)/sizeof(reconnectDelay[0]) && elapsedTime > reconnectDelay[reconnectAttempts]) {
         WiFi.disconnect();
@@ -280,16 +299,14 @@ void modbusRTU(void* parameter) {
   uint8_t result = 0;
 
   while (true) {
-    // Check if it's time to write to registers
     vTaskDelay(pdMS_TO_TICKS(200));
-    Serial.print(":");
 
     // check if time has passed for next modbusRTU transaction
     if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       isRtuTransaction = true;
       transactionStartTime = millis();
 
-      // check if anything sist in write_queue
+      // check if anything sits in write_queue
       if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
         // process write request
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
@@ -323,9 +340,7 @@ void modbusRTU(void* parameter) {
           LOG_ERROR("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
           writeError++;
           // Re-enqueue the failed command
-          if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
-            LOG_ERROR("Failed to re-enqueue failed command. Queue is full.");
-          }
+          enqueueWriteCommand(command.address, command.length, command.values); // Use enqueueWriteCommand here
         }
 
       // if there is nothing in write_queue, proceed with next read  
@@ -338,7 +353,6 @@ void modbusRTU(void* parameter) {
           if (roundRobinTime > maxRoundRobinTime) {
             maxRoundRobinTime = roundRobinTime;
           }
-          Serial.printf("Round robin completed, time: %d, maxTime: %d", roundRobinTime, maxRoundRobinTime);
           LOG_INFO("Round robin completed, time: %d, maxTime: %d", roundRobinTime, maxRoundRobinTime);
           startRoundRobinTime = millis();
         }
@@ -354,7 +368,7 @@ void modbusRTU(void* parameter) {
             maxReadTime = readTime;
           }
           LOG_DEBUG("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
-          Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
+          Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d\n", reg, reg, length, readTime);
           // Iterate through the response and print register values
           for (uint16_t i = 0; i < length; i++) {
             uint16_t value = mbImeon.getResponseBuffer(i);
@@ -371,10 +385,10 @@ void modbusRTU(void* parameter) {
       lastQueryTime = millis();
       isRtuTransaction = false;
       updateTrackingRegisters();
+      }
     }
   }
 }
-
 
 void setup() {
     // Initialize Serial for debugging
@@ -382,9 +396,15 @@ void setup() {
   while (!Serial) {
     ; // Wait for Serial to initialize
   }
-  
+
+  // EEPROM reboot counter
+  EEPROM.begin(512); // Allocate 512 bytes of EEPROM (adjust if needed)
+  rebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS); // Read the reboot counter from EEPROM
+  rebootCounter++; // Increment the counter
+  EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
+  EEPROM.commit();  // Commit the changes to EEPROM (save them!)
+
   // Initialize WiFi
-  // Initial Wi-Fi connection
   Serial.println("Connecting to Wi-Fi...");
   WiFi.begin(WIFI_SSID, WIFI_PASSWD);
 
@@ -431,6 +451,7 @@ void setup() {
   }
   mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
 
+  
   // Initialize the command queue
   commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   if (commandQueue == NULL) {
