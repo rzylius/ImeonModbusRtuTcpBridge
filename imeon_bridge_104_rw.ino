@@ -1,10 +1,5 @@
 #include "secrets.h"
 
-//const char *ssid = "***";
-//const char *password = "***";
-//const char *hostname = "***";
-//const char *syslog_name = "***";
-
 #include <SimpleSyslog.h>
 #include <ModbusIP_ESP8266.h>
 #include <ModbusMaster.h>
@@ -18,11 +13,6 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
-// Modbus configurations
-const uint8_t slaveId = 1;                    // IMEON ModbusRTU Slave ID
-const uint16_t batStartAddress = 768;         // Start address for battery registers
-const uint16_t batNrAddresses = 4;            // Number of battery addresses to process
-
 // Define Modbus instances
 ModbusIP mbTcp;
 ModbusMaster mbImeon;
@@ -30,7 +20,6 @@ ModbusIP mbBat;
 IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to send battery data
 
 // Write Queue Settings
-#define MAX_WRITE_VALUES 10  // Maximum number of registers per command
 struct WriteCommand {
     uint16_t address;            // Register starting address
     uint16_t length;             // Number of registers to write
@@ -38,18 +27,16 @@ struct WriteCommand {
 };
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
-#define QUEUE_LENGTH 10  // Maximum number of commands in the queue
+
 QueueHandle_t commandQueue;  // Queue handle
 
 //--------wifi
 unsigned long wifiReconnectTimer = 0;   // Timer for reconnection attempts
-const unsigned long maxReconnectTime = 30000; // Maximum reconnection time (30 seconds)
 
 // Flags and timing variables for asynchronous processing
 bool isRtuTransaction = false;
 unsigned long transactionStartTime = 0;
 unsigned long nextProcessTime = 0;
-const unsigned long QUERY_INTERVAL = 1000; // time between rtu transactions
 unsigned long lastQueryTime = 0;
 
 // Metrics tracking variables
@@ -69,25 +56,21 @@ uint16_t statusWifi = 0;
 
 uint32_t tcpTime = 0;
 
-// LED pin definitions
-#define LED_TRANS 2   // Transaction LED
-#define LED_ERR 4     // Error LED
-
 // Predefined ranges
 struct RegisterRange {
     uint16_t start;   // Starting register number
     uint16_t length;  // Length of the range
 };
 const RegisterRange predefinedRanges[] = {
-    {256, 32},
+    {256, 30},
     {512, 22},
-    {768, 8},
-    {1024, 20},
-    {1283, 8},
-    {4096, 8},
-    {4352, 8},
+    {768, 4},
+    {1024, 16},
+    {1283, 6},
+    {4096, 5},
+    {4352, 2},
     {4864, 18},
-    {4899, 4},
+    {4899, 1},
     {5125, 8}
 };
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
@@ -160,13 +143,16 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   return Modbus::EX_SUCCESS;
 }
 
+// callback to send info about battery to modbusTCP server 
+// I use it to send to esp32 controller which reads smartmeter readinngs
+// and answers requests from heatpump
 uint16_t cbBat(TRegister* reg, uint16_t val) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
     while (true) {
         if (mbBat.isConnected(mbBatDestination)) {
-            result = mbBat.pushHreg(mbBatDestination, batStartAddress, batStartAddress, batNrAddresses);
+            result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
             mbBat.task();
 
             if (result) {
@@ -213,21 +199,20 @@ bool cbConn(IPAddress ip) {
 
 void updateTrackingRegisters() {
   // Update metrics and tracking registers
-  mbTcp.Hreg(37100, lowWord(readCount));
-  mbTcp.Hreg(37101, highWord(readCount));
-  mbTcp.Hreg(37102, readError);
-  mbTcp.Hreg(37103, readTime);
-  mbTcp.Hreg(37104, maxReadTime);
-  mbTcp.Hreg(37105, lowWord(writeCount));
-  mbTcp.Hreg(37106, highWord(writeCount));
-  mbTcp.Hreg(37107, writeError);
-  mbTcp.Hreg(37108, writeTime);
-  mbTcp.Hreg(37109, maxWriteTime);
-  mbTcp.Hreg(37110, roundRobinTime);
-  mbTcp.Hreg(37111, maxRoundRobinTime);
-  mbTcp.Hreg(37112, uxQueueMessagesWaiting(commandQueue));
+  mbTcp.Hreg(READ_COUNT_H, highWord(readCount));
+  mbTcp.Hreg(READ_COUNT_L, lowWord(readCount));
+  mbTcp.Hreg(READ_ERROR, readError);
+  mbTcp.Hreg(READ_TIME, readTime);
+  mbTcp.Hreg(MAX_READ_TIME, maxReadTime);
+  mbTcp.Hreg(WRITE_COUNT_H, highWord(writeCount));
+  mbTcp.Hreg(WRITE_COUNT_L, lowWord(writeCount));
+  mbTcp.Hreg(WRITE_ERROR, writeError);
+  mbTcp.Hreg(WRITE_TIME, writeTime);
+  mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
+  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
+  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
+  mbTcp.Hreg(WRITE_QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
 }
-
 
 //----------------------Queue commands-------------------------------------------
 void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values) {
@@ -293,13 +278,15 @@ void modbusRTU(void* parameter) {
     // Check if it's time to write to registers
     vTaskDelay(pdMS_TO_TICKS(200));
     Serial.print(":");
-    if (!isRtuTransaction && (millis() - lastQueryTime >= QUERY_INTERVAL)) {
-      Serial.println("RTU start read/write");
-      // Wait for a command to be available
+
+    // check if time has passed for next modbusRTU transaction
+    if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       isRtuTransaction = true;
       transactionStartTime = millis();
+
+      // check if anything sist in write_queue
       if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
-        // Log command details
+        // process write request
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
                       command.address, command.length);
         LOG_INFO("  DEQ: Processing: Address=0x%04X %d, RegNum=%d, Val(s)",
@@ -312,7 +299,7 @@ void modbusRTU(void* parameter) {
         }
         Serial.printf("\n");
 
-        // Multiple registers write (Function Code 0x10)
+        // Multiple registers write (Function Code 0x10), my testing shows that single register write 0x06 does not work
         result = mbImeon.writeMultipleRegisters(command.address, command.length);
         
         // Check the result
@@ -335,8 +322,9 @@ void modbusRTU(void* parameter) {
             LOG_ERROR("Failed to re-enqueue failed command. Queue is full.");
           }
         }
+
+      // if there is nothing in write_queue, proceed with next read  
       } else {
-        // when writeQueue is empty go on reading registers
         // select next range of registers to read
         RegisterRange currentRange = predefinedRanges[currentRangeIndex];
         currentRangeIndex = (currentRangeIndex + 1) % rangeCount; // roll register
@@ -374,6 +362,7 @@ void modbusRTU(void* parameter) {
           readError++;
         }
       }
+      // finish modbusRTU transaction
       lastQueryTime = millis();
       isRtuTransaction = false;
       updateTrackingRegisters();
@@ -413,12 +402,12 @@ void setup() {
   mbTcp.onConnect(cbConn);
   mbTcp.onRequest(cbPreRequest);
   mbTcp.onRequestSuccess(cbPostRequest);
-  mbTcp.onRaw(onModbusRequest);
+  mbTcp.onRaw(onModbusRequest);           // capture all modbusTCP requests and process in callback
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
   
-  Serial2.begin(9600, SERIAL_8N1, 16, 17); // RX = 16, TX = 17
-  mbImeon.begin(1, Serial2);
+  Serial2.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
+  mbImeon.begin(MODBUS_RTU_ID, Serial2);
 
   // Iterate through each range and print all individual registers
   for (int i = 0; i < rangeCount; ++i) {
@@ -428,16 +417,17 @@ void setup() {
       mbTcp.addHreg(reg, 0); // add each register 
     }
   }
-  for (uint16_t i = 37100; i <= 37115; i++) {
+
+  for (uint16_t i = READ_COUNT_H; i <= REBOOT_COUNTER; i++) {
     mbTcp.addHreg(i, 0);
   }
-  mbTcp.onSetHreg(771, cbBat);
+  mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
 
   // Initialize the command queue
-  commandQueue = xQueueCreate(QUEUE_LENGTH, sizeof(WriteCommand));
+  commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   if (commandQueue == NULL) {
       Serial.println("Error: Failed to create commandQueue.");
-      // Handle the error appropriately, possibly by restarting the ESP32
+      // Handle the error  by restarting the ESP32
       ESP.restart();
   } else {
       Serial.println("commandQueue successfully created.");
@@ -453,12 +443,6 @@ void setup() {
       1                                 // Core ID (0 for core 0)
   );
 
-  // Example: Enqueue a few commands
-  //uint8_t values1[] = {0x12, 0x34, 0x56, 0x78};  // Two registers (0x1234, 0x5678)
-  //enqueueWriteCommand(0x0010, 4, values1);
-
-  //uint8_t values2[] = {0x9A, 0xBC};  // One register (0x9ABC)
-  //enqueueWriteCommand(0x0020, 2, values2);
 }
 
 void loop() {
