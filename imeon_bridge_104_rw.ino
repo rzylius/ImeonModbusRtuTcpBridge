@@ -241,6 +241,7 @@ void updateTrackingRegisters() {
   mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
   mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
   mbTcp.Hreg(WRITE_QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
+  mbTcp.Hreg(REBOOT_COUNTER, rebootCounter);
 }
 
 //----------------------Queue commands-------------------------------------------
@@ -399,6 +400,7 @@ void setup() {
   // EEPROM reboot counter
   EEPROM.begin(512); // Allocate 512 bytes of EEPROM (adjust if needed)
   rebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS); // Read the reboot counter from EEPROM
+  Serial.printf("Reboot counter stored in eeprom: %d\n", rebootCounter);
   rebootCounter++; // Increment the counter
   EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
   EEPROM.commit();  // Commit the changes to EEPROM (save them!)
