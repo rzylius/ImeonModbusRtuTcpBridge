@@ -10,7 +10,7 @@
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkLED(LED_ERR)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 // Define Modbus instances
@@ -78,6 +78,7 @@ unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
 
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
+  blinkLED(LED_TRANS);
   uint8_t functionCode = data[0];
   auto src = (Modbus::frame_arg_t*) custom;
   uint16_t transactionId = src->transactionId;
@@ -141,6 +142,12 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       LOG_ERROR("Failed to send response.");
   }
   return Modbus::EX_SUCCESS;
+}
+
+void blinkLED(int led) {
+    digitalWrite(led, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    digitalWrite(led, LOW);
 }
 
 // callback to send info about battery to modbusTCP server 
@@ -266,8 +273,6 @@ void manageWiFi() {
         delay(1000); // Allow time for the log message to be sent
         ESP.restart(); // Reboot the ESP32
     }
-
-    // Optional: Add a cap to prevent too many attempts
 }
 
 void modbusRTU(void* parameter) {
@@ -397,6 +402,9 @@ void setup() {
   }
 
   wifiReconnectTimer = millis(); // Initialize the reconnection timer
+
+  pinMode(LED_ERR, OUTPUT);
+  pinMode(LED_TRANS, OUTPUT);
   
   // Initialize Modbus
   mbTcp.onConnect(cbConn);
