@@ -94,11 +94,30 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   tcpTime = millis();
 
   switch (functionCode) {
-    case 0x01:
-    case 0x03:
+    case 0x01:        // read coils
+    case 0x03:   {     //read holding regs
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
-
+    }
+    case 0x05:  {      //write single coil
+      uint16_t singleCoilValue = (data[3] == 0xFF) ? 1 : 0; // Only check the high byte
+      uint16_t reg_val = 0; // Default value
+      switch (address) {
+        case 615: reg_val = singleCoilValue ? 0x8000 : 0x7FFF; break; // Bit 15
+        case 614: reg_val = singleCoilValue ? 0x4000 : 0xBFFF; break; // Bit 14
+        case 613: reg_val = singleCoilValue ? 0x2000 : 0xDFFF; break; // Bit 13
+        case 612: reg_val = singleCoilValue ? 0x1000 : 0xEFFF; break; // Bit 12
+        case 611: reg_val = singleCoilValue ? 0x0800 : 0xF7FF; break; // Bit 11
+        case 610: reg_val = singleCoilValue ? 0x0400 : 0xFBFF; break; // Bit 10
+        case 609: reg_val = singleCoilValue ? 0x0200 : 0xFDFF; break; // Bit 09
+        case 608: reg_val = singleCoilValue ? 0x0100 : 0xFEFF; break; // Bit 08
+        default: return Modbus::EX_ILLEGAL_ADDRESS; // Unknown register, return error
+      }
+      enqueueWriteCommand(0x1306, 1, &reg_val);
+      mbTcp.Coil(PWR_ADDRESS, 0);
+      mbTcp.Hreg(0x1306, UNDEF_VALUE);
+      return Modbus::EX_PASSTHROUGH;                // process this request further
+    }  
     case 0x06: { 
       // Validate data length 
       uint16_t singleRegValue = (data[3] << 8) | data[4];
@@ -107,10 +126,9 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
                     functionCode, address, address, singleRegValue); 
       
       mbTcp.Hreg(address, UNDEF_VALUE);
-      if (address == 4870) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
+      if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
         mbTcp.Coil(PWR_ADDRESS, 0);
       }
-      
       break;
     }
 
@@ -175,6 +193,7 @@ uint16_t cb0x1306(TRegister* reg, uint16_t val) {
   mbTcp.Coil(PWR_ADDRESS, 1);
   return val;
 }
+
 
 // callback to send info about battery to modbusTCP server 
 // I use it to send to esp32 controller which reads smartmeter readinngs
