@@ -172,6 +172,7 @@ uint16_t cb0x1306(TRegister* reg, uint16_t val) {
     LOG_DEBUG("PWR_ADDRESS: %d, val: %d", PWR_ADDRESS + bit, bit_value);
   }
   mbTcp.Coil(PWR_ADDRESS, 1);
+  return val;
 }
 
 // callback to send info about battery to modbusTCP server 
