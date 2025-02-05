@@ -94,6 +94,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   tcpTime = millis();
 
   switch (functionCode) {
+    case 0x01:
     case 0x03:
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
