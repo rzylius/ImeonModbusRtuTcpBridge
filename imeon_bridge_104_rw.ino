@@ -217,7 +217,7 @@ bool cbConn(IPAddress ip) {
 uint16_t cbRebootCounter(TRegister* reg, uint16_t val) {
   // reset counter if REBOOT_COUNTER hreg set to 0
   if (val == 0) {
-    rebootCounter == 0;
+    rebootCounter = 0;
     EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
     EEPROM.commit();  // Commit the changes to EEPROM (save them!)
   } else {
