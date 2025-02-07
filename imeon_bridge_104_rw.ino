@@ -94,12 +94,12 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   tcpTime = millis();
 
   switch (functionCode) {
-    case 0x01:        // read coils
-    case 0x03:   {     //read holding regs
+    case Modbus::FC_READ_COILS:        // read coils
+    case Modbus::FC_READ_REGS:   {     //read holding regs
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
     }
-    case 0x05:  {      //write single coil
+    case Modbus::FC_WRITE_COIL:  {      //write single coil
       uint16_t singleCoilValue = (data[3] == 0xFF) ? 1 : 0; // Only check the high byte
       uint16_t reg_val = 0; // Default value
       switch (address) {
@@ -118,7 +118,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       mbTcp.Hreg(0x1306, UNDEF_VALUE);
       return Modbus::EX_PASSTHROUGH;                // process this request further
     }  
-    case 0x06: { 
+    case Modbus::FC_WRITE_REG: { 
       // Validate data length 
       uint16_t singleRegValue = (data[3] << 8) | data[4];
       enqueueWriteCommand(address, 1, &singleRegValue);
@@ -132,7 +132,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       break;
     }
 
-    case 0x10: {
+    case Modbus::FC_WRITE_REGS: {
       // Validate data length
       uint16_t regs = (data[3] << 8) | data[4];
       uint8_t byteCount = data[5];
@@ -182,7 +182,7 @@ void blinkLED(int led) {
     digitalWrite(led, LOW);
 }
 
-// transform 0x1306 to coils
+// transform 0x1306 register info to coils
 uint16_t cb0x1306(TRegister* reg, uint16_t val) {
   LOG_DEBUG("cb 0x1306");
   for (uint8_t bit = 8; bit < 16; bit++) {
@@ -240,7 +240,6 @@ Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestDa
 }
 
 Modbus::ResultCode cbPostRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
-  uint16_t t = millis() - tcpTime;
   //LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
   return Modbus::EX_SUCCESS;
 }
