@@ -223,11 +223,6 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
             LOG_ERROR("Connection timeout while transmitting battery data");
             break;
         }
-
-      // Break the loop if the maximum allowed time is exceeded
-      if (millis() - startTime >= 100) {
-          LOG_ERROR("Connection timeout while transmitting battery data");
-          break;
       }
       vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
