@@ -94,20 +94,46 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   tcpTime = millis();
 
   switch (functionCode) {
-    case 0x03:
+    case Modbus::FC_READ_COILS:        // read coils
+    case Modbus::FC_READ_REGS:   {     //read holding regs
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
+    } break;
 
-    case 0x06: { 
+    case Modbus::FC_WRITE_COIL:  {      //write single coil
+      uint16_t singleCoilValue = (data[3] == 0xFF) ? 1 : 0; // Only check the high byte
+      uint16_t reg_val = 0; // Default value
+      switch (address) {
+        case 615: reg_val = singleCoilValue ? 0x8000 : 0x7FFF; break; // Bit 15
+        case 614: reg_val = singleCoilValue ? 0x4000 : 0xBFFF; break; // Bit 14
+        case 613: reg_val = singleCoilValue ? 0x2000 : 0xDFFF; break; // Bit 13
+        case 612: reg_val = singleCoilValue ? 0x1000 : 0xEFFF; break; // Bit 12
+        case 611: reg_val = singleCoilValue ? 0x0800 : 0xF7FF; break; // Bit 11
+        case 610: reg_val = singleCoilValue ? 0x0400 : 0xFBFF; break; // Bit 10
+        case 609: reg_val = singleCoilValue ? 0x0200 : 0xFDFF; break; // Bit 09
+        case 608: reg_val = singleCoilValue ? 0x0100 : 0xFEFF; break; // Bit 08
+        default: return Modbus::EX_ILLEGAL_ADDRESS; // Unknown register, return error
+      }
+      enqueueWriteCommand(0x1306, 1, &reg_val);
+      mbTcp.Hreg(0x1306, UNDEF_VALUE);
+      mbTcp.Coil(PWR_ADDRESS, 0);
+      return Modbus::EX_PASSTHROUGH;                // process this request further
+    } break;
+
+    case Modbus::FC_WRITE_REG: { 
       // Validate data length 
       uint16_t singleRegValue = (data[3] << 8) | data[4];
       enqueueWriteCommand(address, 1, &singleRegValue);
       LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
-      break;
-    }
+      
+      mbTcp.Hreg(address, UNDEF_VALUE);
+      if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
+        mbTcp.Coil(PWR_ADDRESS, 0);
+      }
+    } break;
 
-    case 0x10: {
+    case Modbus::FC_WRITE_REGS: {
       // Validate data length
       uint16_t regs = (data[3] << 8) | data[4];
       uint8_t byteCount = data[5];
@@ -119,8 +145,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       }
       Serial.println("");
       enqueueWriteCommand(address, regs, registerValues);
-      break;
-    }
+    } break;
 
     default: 
       Serial.printf("TCP illegal function received: %02X\n", functionCode);
@@ -157,6 +182,18 @@ void blinkLED(int led) {
     digitalWrite(led, LOW);
 }
 
+// transform 0x1306 register info to coils
+uint16_t cb0x1306(TRegister* reg, uint16_t val) {
+  LOG_DEBUG("cb 0x1306");
+  for (uint8_t bit = 8; bit < 16; bit++) {
+    bool bit_value = (val & (1 << bit)) != 0; // Extract bit 8 to 15 as boolean
+    mbTcp.Coil(PWR_ADDRESS + bit, bit_value); // Assign to coil indexes 0 to 7
+  }
+  mbTcp.Coil(PWR_ADDRESS, 1);
+  return val;
+}
+
+
 // callback to send info about battery to modbusTCP server 
 // I use it to send to esp32 controller which reads smartmeter readinngs
 // and answers requests from heatpump
@@ -164,36 +201,30 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
-    while (true) {
-        if (mbBat.isConnected(mbBatDestination)) {
-            result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
-            mbBat.task();
+  while (true) {
+    if (mbBat.isConnected(mbBatDestination)) {
+      result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
+      mbBat.task();
 
-            if (result) {
-                LOG_INFO("Battery data transmitted successfully");
-                return val;
-            } else {
-                LOG_ERROR("Failed to transmit battery data");
-                break;
-            }
-        } else {
-            mbBat.connect(mbBatDestination);
-        }
-
-        // Break the loop if the maximum allowed time is exceeded
-        if (millis() - startTime >= 100) {
-            LOG_ERROR("Connection timeout while transmitting battery data");
-            break;
-        }
-
-      // Break the loop if the maximum allowed time is exceeded
-      if (millis() - startTime >= 100) {
-          LOG_ERROR("Connection timeout while transmitting battery data");
+      if (result) {
+          LOG_INFO("Battery data transmitted successfully");
+          return val;
+      } else {
+          LOG_ERROR("Failed to transmit battery data");
           break;
       }
-      vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+    } else {
+      mbBat.connect(mbBatDestination);
     }
-    return val;
+
+    // Break the loop if the maximum allowed time is exceeded
+    if (millis() - startTime >= 100) {
+      LOG_ERROR("Connection timeout while transmitting battery data");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+  }
+  return val;
 }
 
 Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
@@ -202,7 +233,6 @@ Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestDa
 }
 
 Modbus::ResultCode cbPostRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
-  uint16_t t = millis() - tcpTime;
   //LOG_DEBUG("TCP fc: %d, time: %d\n", fc, t);
   return Modbus::EX_SUCCESS;
 }
@@ -451,6 +481,11 @@ void setup() {
     mbTcp.addHreg(i, 0);
   }
   mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
+
+  for (int i = 0; i < 16; ++i) {
+    mbTcp.addCoil(PWR_ADDRESS + i, 0);
+  }
+  mbTcp.onSetHreg(4870, cb0x1306);
 
   
   // Initialize the command queue
