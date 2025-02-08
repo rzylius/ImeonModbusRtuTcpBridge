@@ -1,4 +1,5 @@
 #include "secrets.h"
+#include "config.h"
 
 #include <SimpleSyslog.h>
 #include <ModbusIP_ESP8266.h>
@@ -61,26 +62,6 @@ uint16_t rebootCounter = 0;
 
 uint32_t tcpTime = 0;
 
-// Predefined ranges
-struct RegisterRange {
-    uint16_t start;   // Starting register number
-    uint16_t length;  // Length of the range
-};
-// registers in decimal and length, which will be queried from IMEON in round robin fashion
-// and stored in mbTcp
-const RegisterRange predefinedRanges[] = {
-    {256, 30},
-    {512, 22},
-    {768, 4},
-    {1024, 16},
-    {1283, 6},
-    {4096, 5},
-    {4352, 2},
-    {4864, 18},
-    {4899, 1},
-    {5125, 8}
-};
-const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
 unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
 
@@ -176,11 +157,6 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   return Modbus::EX_SUCCESS;
 }
 
-void blinkLED(int led) {
-    digitalWrite(led, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    digitalWrite(led, LOW);
-}
 
 // transform 0x1306 register info to coils
 uint16_t cb0x1306(TRegister* reg, uint16_t val) {
