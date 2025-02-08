@@ -19,6 +19,7 @@ of 10sec, so I find it not optimal to implement synchronuous RTU-TCP bridge
 (as in this case your TCP requests would experiencethe same 10sec timeouts).
 
 ## Logic
+
 - esp32 rotates predefined list of registers/length reads them from IMEON RTU and
   stores in esp32 local registers. When delay between requests is set to 1 sec,
   my round of reads is completed in ~16secs.
@@ -38,6 +39,33 @@ of 10sec, so I find it not optimal to implement synchronuous RTU-TCP bridge
 * **Syslog Integration:**  Utilizes Syslog for logging events and errors to a remote server
     for debugging and monitoring.
 * **WiFi Reconnection:**  Includes a mechanism to automatically reconnect to Wi-Fi in case of disconnection.
+
+
+## 0x1306 register in coils
+
+There is register 0x1306 which manages power settings of IMEON.
+8-15 bits of the register have separate functions, and can be changed only one by one.
+So in essence they are coils, which for some reason are made in holding register.
+
+esp32 retrieves 0x1306 register and saves it localy the same way, and as coils.
+When coils are changed, it puts accordingly write request to send to IMEON
+
+So coils works booth ways, as indication of status and as a means to change status.
+
+Coil values
+* 600 coil is status coil. It is set to 0, when write TCP request is receives (either 0x1306 or coils)
+  when new status is received from IMEON, 600 set to 1
+* 607 is 7 bit of 0x1306
+* ...
+* 615 is 15th bit of 0x1306
+
+Process of change of 0x1306
+  when tcp request changes 0x1306, or any of coils 607-615,
+  0x1306 is set to 0xFFFF
+  600 is set to 0
+  write request is placed to write_queue (and eventually written to Imeon)
+  when 0x1306 is read from Imeon, values are set to localy, coils 607-615 updated
+  600 is set to 1
 
 ## Metrics
 
