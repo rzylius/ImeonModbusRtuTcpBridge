@@ -202,31 +202,30 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
-    while (true) {
-        if (mbBat.isConnected(mbBatDestination)) {
-            result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
-            mbBat.task();
+  while (true) {
+    if (mbBat.isConnected(mbBatDestination)) {
+      result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
+      mbBat.task();
 
-            if (result) {
-                LOG_INFO("Battery data transmitted successfully");
-                return val;
-            } else {
-                LOG_ERROR("Failed to transmit battery data");
-                break;
-            }
-        } else {
-            mbBat.connect(mbBatDestination);
-        }
-
-        // Break the loop if the maximum allowed time is exceeded
-        if (millis() - startTime >= 100) {
-            LOG_ERROR("Connection timeout while transmitting battery data");
-            break;
-        }
+      if (result) {
+          LOG_INFO("Battery data transmitted successfully");
+          return val;
+      } else {
+          LOG_ERROR("Failed to transmit battery data");
+          break;
       }
-      vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+    } else {
+      mbBat.connect(mbBatDestination);
     }
-    return val;
+
+    // Break the loop if the maximum allowed time is exceeded
+    if (millis() - startTime >= 100) {
+      LOG_ERROR("Connection timeout while transmitting battery data");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+  }
+  return val;
 }
 
 Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
