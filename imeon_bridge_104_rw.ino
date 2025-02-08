@@ -98,7 +98,8 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
     case Modbus::FC_READ_REGS:   {     //read holding regs
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
-    }
+    } break;
+
     case Modbus::FC_WRITE_COIL:  {      //write single coil
       uint16_t singleCoilValue = (data[3] == 0xFF) ? 1 : 0; // Only check the high byte
       uint16_t reg_val = 0; // Default value
@@ -114,10 +115,11 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
         default: return Modbus::EX_ILLEGAL_ADDRESS; // Unknown register, return error
       }
       enqueueWriteCommand(0x1306, 1, &reg_val);
-      mbTcp.Coil(PWR_ADDRESS, 0);
       mbTcp.Hreg(0x1306, UNDEF_VALUE);
+      mbTcp.Coil(PWR_ADDRESS, 0);
       return Modbus::EX_PASSTHROUGH;                // process this request further
-    }  
+    } break;
+
     case Modbus::FC_WRITE_REG: { 
       // Validate data length 
       uint16_t singleRegValue = (data[3] << 8) | data[4];
@@ -129,8 +131,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
         mbTcp.Coil(PWR_ADDRESS, 0);
       }
-      break;
-    }
+    } break;
 
     case Modbus::FC_WRITE_REGS: {
       // Validate data length
@@ -144,8 +145,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       }
       Serial.println("");
       enqueueWriteCommand(address, regs, registerValues);
-      break;
-    }
+    } break;
 
     default: 
       Serial.printf("TCP illegal function received: %02X\n", functionCode);
