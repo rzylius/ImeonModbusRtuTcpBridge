@@ -127,10 +127,12 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
       
-      mbTcp.Hreg(address, UNDEF_VALUE);
-      if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
-        mbTcp.Coil(PWR_ADDRESS, 0);
-      }
+      #if ENABLE_TEMP_STATE     
+        mbTcp.Hreg(address, UNDEF_VALUE);
+        if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
+          mbTcp.Coil(PWR_ADDRESS, 0);
+        }
+      #endif
     } break;
 
     case Modbus::FC_WRITE_REGS: {
@@ -189,7 +191,9 @@ uint16_t cb0x1306(TRegister* reg, uint16_t val) {
     bool bit_value = (val & (1 << bit)) != 0; // Extract bit 8 to 15 as boolean
     mbTcp.Coil(PWR_ADDRESS + bit, bit_value); // Assign to coil indexes 0 to 7
   }
-  mbTcp.Coil(PWR_ADDRESS, 1);
+  #if ENABLE_TEMP_STATE
+    mbTcp.Coil(PWR_ADDRESS, 1);
+  #endif
   return val;
 }
 
@@ -247,7 +251,7 @@ bool cbConn(IPAddress ip) {
 uint16_t cbRebootCounter(TRegister* reg, uint16_t val) {
   // reset counter if REBOOT_COUNTER hreg set to 0
   if (val == 0) {
-    rebootCounter == 0;
+    rebootCounter = 0;
     EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
     EEPROM.commit();  // Commit the changes to EEPROM (save them!)
   } else {
