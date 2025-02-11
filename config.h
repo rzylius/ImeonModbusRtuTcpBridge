@@ -6,7 +6,7 @@
 // Define the RegisterRange structure
 // list of registers in the config.cpp
 struct RegisterRange {
-    int startAddress;
+    int start;
     int length;
 };
 extern const RegisterRange predefinedRanges[];
