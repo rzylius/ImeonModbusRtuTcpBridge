@@ -1,9 +1,47 @@
 #include "utilities.h"
 #include "logging.h"
 #include <EEPROM.h>               // for storing reboot counter
+#include "esp_system.h"           // ESP framework
+#include <esp_task_wdt.h>         // ESP watchdog
+#include <ModbusMaster.h>
+#include "modbus_tcp.h"
+
 
 QueueHandle_t commandQueue = NULL; 
 uint16_t rebootCounter = 0;
+
+// Metrics tracking variables
+uint32_t readCount = 0;
+uint16_t readError = 0;
+uint16_t readTime = 0;
+uint16_t maxReadTime = 0;
+uint32_t writeCount = 0;      // Tracks total write requests
+uint16_t writeError = 0;         // Tracks write errors
+uint16_t writeTime = 0;    // 
+uint16_t maxWriteTime = 0;    // Max response time for write requests
+uint16_t roundRobinTime = 0;
+uint16_t maxRoundRobinTime = 0;    // Max time to process all set reads
+uint32_t startRoundRobinTime = 0;      // 
+uint16_t writeQueueCount = 0;
+
+void updateTrackingRegisters() {
+  // Update metrics and tracking registers
+  mbTcp.Hreg(READ_COUNT_H, highWord(readCount));
+  mbTcp.Hreg(READ_COUNT_L, lowWord(readCount));
+  mbTcp.Hreg(READ_ERROR, readError);
+  mbTcp.Hreg(READ_TIME, readTime);
+  mbTcp.Hreg(MAX_READ_TIME, maxReadTime);
+  mbTcp.Hreg(WRITE_COUNT_H, highWord(writeCount));
+  mbTcp.Hreg(WRITE_COUNT_L, lowWord(writeCount));
+  mbTcp.Hreg(WRITE_ERROR, writeError);
+  mbTcp.Hreg(WRITE_TIME, writeTime);
+  mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
+  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
+  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
+  mbTcp.Hreg(WRITE_QUEUE_SIZE, writeQueueCount);
+  mbTcp.Hreg(REBOOT_COUNTER, rebootCounter);
+}
+
 
 void writeQueueInit() {
   // Initialize the command queue
