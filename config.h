@@ -1,6 +1,9 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <Arduino.h>
+#include <IPAddress.h>
+
 // Modbus configurations
 #define BAT_START_ADDRESS 768         // Start address for battery registers
 #define BAT_NR_ADDRESSES 4            // Number of battery addresses to process
@@ -36,8 +39,19 @@
 #define MAX_ROUND_ROBIN_TIME 37111  // in seconds
 
 #define WRITE_QUEUE_SIZE 37120    // modbusRTU write commands standing in queue
-// counter for monitoring reboots. resets when you set it to zero
+                                  // counter for monitoring reboots. resets when you set it to zero
 #define REBOOT_COUNTER 37121
 #define EEPROM_REBOOT_COUNTER_ADDRESS 0
+
+extern IPAddress mbBatDestination;
+
+// Define the RegisterRange structure
+// list of registers in the config.cpp
+struct RegisterRange {
+    int start;
+    int length;
+};
+extern const RegisterRange predefinedRanges[];
+extern const int rangeCount;
 
 #endif
