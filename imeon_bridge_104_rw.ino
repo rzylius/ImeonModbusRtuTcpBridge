@@ -37,6 +37,11 @@ void modbusRTU(void* parameter) {
     // check if time has passed for next modbusRTU transaction
     if (!isRtuTransaction && (millis() - lastQueryTime >= READ_QUERY_INTERVAL)) {
       isRtuTransaction = true;
+      
+      #if LED_MODE == 1 || LED_MODE == 2
+      blinkLED(LED_RTU_TX);
+      #endif
+
       transactionStartTime = millis();
 
       // check if anything sits in write_queue
@@ -57,8 +62,14 @@ void modbusRTU(void* parameter) {
         // Multiple registers write (Function Code 0x10), my testing shows that single register write 0x06 does not work
         result = mbImeon.writeMultipleRegisters(command.address, command.length);
         
-        // Check the result
+        
+          // Check the result
         if (result == 0) {
+          
+          #if LED_MODE == 1 || LED_MODE == 2
+          blinkLED(LED_RTU_TX);
+          #endif
+
           writeCount++;
           writeTime = millis() - transactionStartTime;
           if (maxWriteTime < writeTime) {
@@ -95,6 +106,11 @@ void modbusRTU(void* parameter) {
         result = mbImeon.readHoldingRegisters(reg, length);
         
         if (result == 0) {
+
+          #if LED_MODE == 1 || LED_MODE == 2
+          blinkLED(LED_RTU_RX);
+          #endif
+
           readCount++;
           readTime = millis() - transactionStartTime;
           if (maxReadTime < readTime) {
@@ -123,20 +139,15 @@ void modbusRTU(void* parameter) {
 }
 
 void setup() {
-    // Initialize Serial for debugging
-  Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for Serial to initialize
-  }
-
+  
   connectWiFi();
+  loggingInit();
   rebootCounterInit();
   writeQueueInit();
   modbusTcpInit();
 
 
-  pinMode(LED_ERR, OUTPUT);
-  pinMode(LED_TRANS, OUTPUT);
+  
  
   Serial2.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
   mbImeon.begin(MODBUS_RTU_ID, Serial2);

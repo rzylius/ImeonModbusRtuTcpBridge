@@ -23,12 +23,12 @@ uint16_t cb0x1306(TRegister* reg, uint16_t val) {
 }
 
 
-// callback to send info about battery to modbusTCP server 
-// I use it to send to esp32 controller which reads smartmeter readinngs
-// and answers requests from heatpump
 uint16_t cbBat(TRegister* reg, uint16_t val) {
-    unsigned long startTime = millis();
-    uint16_t result = 0;
+  // callback to send info about battery to modbusTCP server 
+  // I use it to send to esp32 controller which reads smartmeter readinngs
+  // and answers requests from heatpump
+  unsigned long startTime = millis();
+  uint16_t result = 0;
 
   while (true) {
     if (mbBat.isConnected(mbBatDestination)) {
@@ -53,11 +53,12 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
     }
     vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
   }
+
   return val;
 }
 
-Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
-  blinkLED(LED_TRANS);
+Modbus::ResultCode onModbusTcpRequest(uint8_t* data, uint8_t length, void* custom) {
+  blinkLED(LED_TCP);
   uint8_t functionCode = data[0];
   auto src = (Modbus::frame_arg_t*) custom;
   uint16_t transactionId = src->transactionId;
@@ -87,8 +88,10 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
         default: return Modbus::EX_ILLEGAL_ADDRESS; // Unknown register, return error
       }
       enqueueWriteCommand(0x1306, 1, &reg_val);
-      mbTcp.Hreg(0x1306, UNDEF_VALUE);
-      mbTcp.Coil(PWR_ADDRESS, 0);
+      #if ENABLE_TEMP_STATE
+        mbTcp.Hreg(0x1306, UNDEF_VALUE);
+        mbTcp.Coil(PWR_ADDRESS, 0);
+      #endif
       return Modbus::EX_PASSTHROUGH;                // process this request further
     } break;
 
@@ -99,7 +102,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
       
-      #if ENABLE_TEMP_STATE     
+      #if ENABLE_TEMP_STATE
         mbTcp.Hreg(address, UNDEF_VALUE);
         if (address == 0x1306) {                //if 0x1306 register gets modbusTCP write command, set PWR_ADDRESS to 0
           mbTcp.Coil(PWR_ADDRESS, 0);
@@ -134,6 +137,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   response[2] = data[2];                   // Starting Address Low Byte
   response[3] = data[3];                   // value of register
   response[4] = data[4];                   // value of register
+  
   // Instantly respond with success to the client
   mbTcp.setTransactionId(src->transactionId);
   uint16_t result = mbTcp.rawResponce(
@@ -142,6 +146,7 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       5,                       // Length of response payload (Unit ID + Function Code + Address + Quantity)
       src->unitId              // Unit Identifier
   );
+  // lig the success
   if (result) {
       LOG_DEBUG("Success response sent for transaction: %d\n", src->transactionId);
   } else {
@@ -184,7 +189,7 @@ void modbusTcpInit(){
   mbTcp.onConnect(cbConn);
   mbTcp.onRequest(cbPreRequest);
   mbTcp.onRequestSuccess(cbPostRequest);
-  mbTcp.onRaw(onModbusRequest);           // capture all modbusTCP requests and process in callback
+  mbTcp.onRaw(onModbusTcpRequest);           // capture all modbusTCP requests and process in callback
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
 
