@@ -1,6 +1,4 @@
 #include "config.h"
-#include <Arduino.h>
-#include <IPAddress.h>
 
 // IP address to send battery info to modbusTCP server
 IPAddress mbBatDestination(10, 0, 20, 220); 

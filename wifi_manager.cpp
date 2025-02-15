@@ -2,7 +2,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "secrets.h"  // Contains your WiFi credentials
-#include "modbus_tcp.h"
 #include "logging.h"
 
 static unsigned long wifiReconnectTimer = 0;
@@ -20,10 +19,9 @@ void connectWiFi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("\nConnected to Wi-Fi. IP Address: %s\n", WiFi.localIP().toString().c_str());
-      LOG_INFO("\nConnected to Wi-Fi. IP Address: %s", WiFi.localIP().toString().c_str());
+      LOG_INFO("Connected to Wi-Fi. IP Address: %s\n", WiFi.localIP().toString().c_str());
   } else {
-      Serial.println("\nInitial Wi-Fi connection failed. Managing reconnection...");
+      LOG_ERROR("\nInitial Wi-Fi connection failed. Managing reconnection...\n");
   }
 
   wifiReconnectTimer = millis(); // Initialize the reconnection timer
@@ -39,7 +37,7 @@ void manageWiFi() {
         reconnectAttempts = 0; // Reset attempts on successful connection
         return;
     }
-    Serial.println("Wi-Fi disconnected. Attempting to reconnect...");
+    LOG_ERROR("Wi-Fi disconnected. Attempting to reconnect...\n");
     // Start or continue the reconnection timer
     if (wifiReconnectTimer == 0) {
         wifiReconnectTimer = millis();
@@ -53,7 +51,7 @@ void manageWiFi() {
     }
 
     if (reconnectAttempts >= sizeof(reconnectDelay)/sizeof(reconnectDelay[0])) {
-        Serial.println("Reconnection failed. Rebooting...");
+        LOG_ERROR("Reconnection failed. Rebooting...\n");
         delay(1000); // Allow time for the log message to be sent
         ESP.restart(); // Reboot the ESP32
     }

@@ -1,5 +1,4 @@
 #include "modbus_tcp.h"
-#include <ModbusIP_ESP8266.h>
 #include <Arduino.h>
 #include "logging.h"
 #include "utilities.h"
@@ -88,6 +87,8 @@ Modbus::ResultCode onModbusTcpRequest(uint8_t* data, uint8_t length, void* custo
         default: return Modbus::EX_ILLEGAL_ADDRESS; // Unknown register, return error
       }
       enqueueWriteCommand(0x1306, 1, &reg_val);
+      LOG_DEBUG("TCPwrite Coil-Hreg: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
+                    functionCode, address, address, reg_val); 
       #if ENABLE_TEMP_STATE
         mbTcp.Hreg(0x1306, UNDEF_VALUE);
         mbTcp.Coil(PWR_ADDRESS, 0);
@@ -99,7 +100,7 @@ Modbus::ResultCode onModbusTcpRequest(uint8_t* data, uint8_t length, void* custo
       // Validate data length 
       uint16_t singleRegValue = (data[3] << 8) | data[4];
       enqueueWriteCommand(address, 1, &singleRegValue);
-      LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
+      LOG_DEBUG("TCPwrite single Hreg: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
       
       #if ENABLE_TEMP_STATE
@@ -118,14 +119,13 @@ Modbus::ResultCode onModbusTcpRequest(uint8_t* data, uint8_t length, void* custo
       uint16_t registerValues[regs];
       for (int i = 0; i < regs; i++) {
         registerValues[i] = (data[6 + i*2] << 8) | data[6 + i*2 + 1];
-        Serial.printf(" 0x%04X ", registerValues[i]);
       }
-      Serial.println("");
       enqueueWriteCommand(address, regs, registerValues);
+      LOG_DEBUG("TCPwrite Hregs: 0x%02X, Addr=%d 0x%02X\n", 
+                    functionCode, address, address); 
     } break;
 
     default: 
-      Serial.printf("TCP illegal function received: %02X\n", functionCode);
       LOG_ERROR("TCP illegal function received: %02X\n", functionCode);
       return Modbus::EX_ILLEGAL_FUNCTION;
   }  
@@ -168,7 +168,6 @@ Modbus::ResultCode cbPostRequest(Modbus::FunctionCode fc, const Modbus::RequestD
 
 // Callback function for client connect. Returns true to allow connection.
 bool cbConn(IPAddress ip) {
-  Serial.printf("TCP client connected %s\n", ip.toString().c_str());
   LOG_INFO("TCP client connected %s\n", ip.toString().c_str());;
   return true;
 }

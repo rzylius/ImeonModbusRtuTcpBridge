@@ -16,7 +16,7 @@
                      // set 2 if you use RGB led on the esp-s3 device
 
 #ifdef LED_MODE == 2  // if on s3 you use the onboard RGB Led
-#define LED_PIN    48 // GPIO pin connected to the NeoPixel LED
+#define LED_PIN 48    // GPIO pin connected to the NeoPixel LED
 #define NUMPIXELS 1   // Number of NeoPixels
 #define LED_TCP 0
 #define LED_ERR 1
@@ -24,8 +24,8 @@
 #define LED_RTU_RX 3
 #elif LED_MODE == 1
                         // in this case we use pins
-#define LED_TCP 36   // 26 Transaction LED pin
-#define LED_ERR 37     // 33 Error LED pin
+#define LED_TCP 36      // 26 Transaction LED pin
+#define LED_ERR 37      // 33 Error LED pin
 #define LED_RTU_TX 38
 #define LED_RTU_RX 39
 #endif

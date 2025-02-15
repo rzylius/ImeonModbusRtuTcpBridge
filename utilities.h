@@ -1,8 +1,6 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
-#include <freertos/FreeRTOS.h>    // for multitasking on dedicated cores
-#include <freertos/queue.h>       // write queue management
 #include "config.h"
 
 extern uint16_t rebootCounter;
@@ -25,10 +23,10 @@ extern uint16_t maxWriteTime;    // Max response time for write requests
 extern uint16_t roundRobinTime;
 extern uint16_t maxRoundRobinTime;    // Max time to process all set reads
 extern uint32_t startRoundRobinTime;      // 
-extern uint16_t writeQueueCount;
+extern uint16_t commandQueueCount;
 
 
-void writeQueueInit();
+void commandQueueInit();
 void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values);
 void rebootCounterInit();
 void rebootCounterSet(int rebootCounter);

@@ -25,9 +25,10 @@ For writing requests
 
 ## 0x1306 register in coils
 
-NOTE: this functionality is enables by the flag in config.h:
-  #define ENABLE_TEMP_STATE 1
-disabled with 0
+NOTE: this functionality is enabled by the flag in config.h:
+
+#define ENABLE_TEMP_STATE 1
+  disabled with 0
 
 There is register 0x1306 which manages power settings of IMEON.
 8-15 bits of the register have separate functions, and can be changed only one by one.

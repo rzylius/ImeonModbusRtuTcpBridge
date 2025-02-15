@@ -25,11 +25,9 @@ const uint32_t ledColors[] = {
 #endif
 
 void loggingInit() {
-  // Initialize Serial for debugging
-  Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for Serial to initialize
-  }
+
+  
+
 
   #ifdef LED_MODE == 2
   pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)

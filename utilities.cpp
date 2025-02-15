@@ -1,8 +1,7 @@
 #include "utilities.h"
 #include "logging.h"
 #include <EEPROM.h>               // for storing reboot counter
-#include "esp_system.h"           // ESP framework
-#include <esp_task_wdt.h>         // ESP watchdog
+//#include "esp_system.h"           // ESP framework
 #include <ModbusMaster.h>
 #include "modbus_tcp.h"
 
@@ -22,7 +21,7 @@ uint16_t maxWriteTime = 0;    // Max response time for write requests
 uint16_t roundRobinTime = 0;
 uint16_t maxRoundRobinTime = 0;    // Max time to process all set reads
 uint32_t startRoundRobinTime = 0;      // 
-uint16_t writeQueueCount = 0;
+uint16_t commandQueueCount = 0;
 
 void updateTrackingRegisters() {
   // Update metrics and tracking registers
@@ -38,20 +37,20 @@ void updateTrackingRegisters() {
   mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
   mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
   mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
-  mbTcp.Hreg(WRITE_QUEUE_SIZE, writeQueueCount);
+  mbTcp.Hreg(WRITE_QUEUE_SIZE, commandQueueCount);
   mbTcp.Hreg(REBOOT_COUNTER, rebootCounter);
 }
 
 
-void writeQueueInit() {
+void commandQueueInit() {
   // Initialize the command queue
   commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   if (commandQueue == NULL) {
-      Serial.println("Error: Failed to create commandQueue.");
+      LOG_ERROR("Error: Failed to create commandQueue.\n");
       // Handle the error  by restarting the ESP32
       ESP.restart();
   } else {
-      Serial.println("commandQueue successfully created.");
+      LOG_INFO("commandQueue successfully created.\n");
   }
 }
 
