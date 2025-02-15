@@ -59,17 +59,28 @@ void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_
   command.address = address;
   command.length = registerCount; // store number of registers
   memcpy(command.values, values, registerCount * sizeof(uint16_t));
-  // Send to queue
-  // Enqueue the command
-  if (xQueueSend(commandQueue, &command, portMAX_DELAY) == pdTRUE) {
-    LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
-    for (uint16_t i = 0; i < registerCount; i++) {
-      LOG_DEBUG(" 0x%04X", values[i]);
+  
+  if (values!= nullptr) { // Check if values is not null
+    memcpy(command.values, values, registerCount * sizeof(uint16_t));
+  } else {
+    LOG_ERROR("enqueueWriteCommand: values pointer is null!");
+    return; 
+  }
+
+  // Check if the queue is full before sending
+  if (uxQueueSpacesAvailable(commandQueue) > 0) { // Check available spaces
+    if (xQueueSend(commandQueue, &command, 0) == pdTRUE) { // Use a 0 timeout, no blocking
+      LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
+      for (uint16_t i = 0; i < registerCount; i++) {
+        LOG_DEBUG(" 0x%04X", values[i]);
+      }
+    } else {
+      LOG_ERROR("ENQ Error enqueuing - shouldn't happen with uxQueueSpacesAvailable check neede");
     }
   } else {
-    Serial.println("Failed to enqueue command.");
-    LOG_ERROR("Failed to enqueue command.");
+    LOG_ERROR("ENQ Queue is full! Droping the command Address: 0x%04X, RegNum: %d", address, registerCount);
   }
+  
 }
 
 void rebootCounterInit() {
