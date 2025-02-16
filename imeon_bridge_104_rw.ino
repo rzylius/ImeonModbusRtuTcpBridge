@@ -435,7 +435,7 @@ void setup() {
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
   
-  Serial2.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
+  Serial1.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
   mbImeon.begin(MODBUS_RTU_ID, Serial2);
 
   // Iterate through each range and print all individual registers
