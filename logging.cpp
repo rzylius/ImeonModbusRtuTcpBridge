@@ -3,6 +3,7 @@
 #include "config.h"
 #include <Adafruit_NeoPixel.h>
 
+#define BLINK_TIME 20
 // Initialize the global syslog object.
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 
@@ -46,14 +47,14 @@ void loggingInit() {
 void blinkLED(int led) {
   pixels.setPixelColor(0, ledColors[led]);
   pixels.show();
-  vTaskDelay(pdMS_TO_TICKS(50));
+  vTaskDelay(pdMS_TO_TICKS(BLINK_TIME));
   pixels.setPixelColor(0, colorOff);
   pixels.show();
 }
 #elif == 1
 void blinkLED(int led) {
     digitalWrite(led, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(BLINK_TIME));
     digitalWrite(led, LOW);
 }
 #endif

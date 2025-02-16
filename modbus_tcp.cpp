@@ -35,10 +35,10 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
       mbBat.task();
 
       if (result) {
-          LOG_INFO("Battery data transmitted successfully");
+          LOG_INFO("Battery data transmitted successfully\n");
           return val;
       } else {
-          LOG_ERROR("Failed to transmit battery data");
+          LOG_ERROR("Failed to transmit battery data\n");
           break;
       }
     } else {

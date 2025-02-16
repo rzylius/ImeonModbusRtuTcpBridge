@@ -37,7 +37,7 @@
 #define BAUD_RATE 9600
 
 #define MODBUS_RTU_ID 1
-#define READ_QUERY_INTERVAL 1000  // milisecs between reads of modbusRTU
+#define READ_QUERY_INTERVAL 500  // milisecs between reads of modbusRTU
 #define WRITE_QUEUE_LENGTH 10  // Maximum number of commands in the queue
 #define MAX_WRITE_VALUES 15       // Maximum number of registers per command
 
