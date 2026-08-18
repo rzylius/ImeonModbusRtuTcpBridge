@@ -84,48 +84,125 @@ const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); /
 unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
 
+// IMEON Modbus protocol vA.29 defines the exact number of words accepted by
+// each writable command. Reject partial, oversized and undocumented commands
+// before they reach the RTU bus.
+const RegisterRange writableCommands[] = {
+    {0x9000, 4},
+    {0x1000, 1}, {0x1001, 4},
+    {0x1100, 2},
+    {0x1300, 2},
+    {0x1303, 1}, {0x1304, 1}, {0x1305, 1}, {0x1306, 1},
+    {0x1307, 1}, {0x1308, 1}, {0x1309, 2}, {0x130B, 1},
+    {0x130C, 1}, {0x130D, 1}, {0x130E, 1}, {0x130F, 1},
+    {0x1310, 1}, {0x1311, 1}, {0x1312, 1}, {0x1313, 1},
+    {0x1314, 1}, {0x1315, 1},
+    {0x1316, 3}, {0x1319, 3}, {0x131C, 3}, {0x131F, 3},
+    {0x1321, 1}, {0x1322, 1}, {0x1323, 1}, {0x1324, 1},
+    {0x1405, 4}, {0x1409, 4}, {0x140D, 5},
+    {0x1417, 1}, {0x1418, 1}, {0x1419, 2},
+    {0x1421, 2}, {0x1423, 5}
+};
+const int writableCommandCount = sizeof(writableCommands) / sizeof(writableCommands[0]);
+
+bool isDocumentedWrite(uint16_t address, uint16_t registerCount) {
+  for (int i = 0; i < writableCommandCount; i++) {
+    if (writableCommands[i].start == address && writableCommands[i].length == registerCount) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values);
+
+Modbus::ResultCode sendTcpException(
+    Modbus::frame_arg_t* source,
+    uint8_t functionCode,
+    Modbus::ResultCode exceptionCode) {
+  uint8_t response[] = {
+      static_cast<uint8_t>(functionCode | 0x80),
+      static_cast<uint8_t>(exceptionCode)
+  };
+  mbTcp.setTransactionId(source->transactionId);
+  mbTcp.rawResponce(
+      IPAddress(source->ipaddr),
+      response,
+      sizeof(response),
+      source->unitId
+  );
+  return Modbus::EX_SUCCESS;
+}
+
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
+  if (data == nullptr || custom == nullptr || length < 1) {
+    return Modbus::EX_ILLEGAL_VALUE;
+  }
+
   blinkLED(LED_TRANS);
   uint8_t functionCode = data[0];
   auto src = (Modbus::frame_arg_t*) custom;
-  uint16_t transactionId = src->transactionId;
-  uint16_t address = (data[1] << 8) | data[2];
       
   tcpTime = millis();
 
   switch (functionCode) {
-    case 0x03:
+    case 0x03: {
+      if (length != 5) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+      }
+      uint16_t address = (data[1] << 8) | data[2];
       LOG_DEBUG("TCPread: 0x%02X, Address: 0x%02X %d, passthrough\n", functionCode, address, address);
       return Modbus::EX_PASSTHROUGH;
+    }
 
-    case 0x06: { 
-      // Validate data length 
+    case 0x06: {
+      if (length != 5) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+      }
+      uint16_t address = (data[1] << 8) | data[2];
+      if (!isDocumentedWrite(address, 1)) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_ADDRESS);
+      }
       uint16_t singleRegValue = (data[3] << 8) | data[4];
-      enqueueWriteCommand(address, 1, &singleRegValue);
+      if (!enqueueWriteCommand(address, 1, &singleRegValue)) {
+        return sendTcpException(src, functionCode, Modbus::EX_SLAVE_DEVICE_BUSY);
+      }
       LOG_DEBUG("TCPwrite: 0x%02X, Addr=%d 0x%02X, Value=%d\n", 
                     functionCode, address, address, singleRegValue); 
       break;
     }
 
     case 0x10: {
-      // Validate data length
+      if (length < 6) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+      }
+      uint16_t address = (data[1] << 8) | data[2];
       uint16_t regs = (data[3] << 8) | data[4];
       uint8_t byteCount = data[5];
-      
-      uint16_t registerValues[regs];
-      for (int i = 0; i < regs; i++) {
+
+      if (regs == 0 || regs > MAX_WRITE_VALUES || byteCount != regs * 2 || length != 6 + byteCount) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+      }
+      if (!isDocumentedWrite(address, regs)) {
+        return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_ADDRESS);
+      }
+
+      uint16_t registerValues[MAX_WRITE_VALUES];
+      for (uint16_t i = 0; i < regs; i++) {
         registerValues[i] = (data[6 + i*2] << 8) | data[6 + i*2 + 1];
         Serial.printf(" 0x%04X ", registerValues[i]);
       }
       Serial.println("");
-      enqueueWriteCommand(address, regs, registerValues);
+      if (!enqueueWriteCommand(address, regs, registerValues)) {
+        return sendTcpException(src, functionCode, Modbus::EX_SLAVE_DEVICE_BUSY);
+      }
       break;
     }
 
     default: 
       Serial.printf("TCP illegal function received: %02X\n", functionCode);
       LOG_ERROR("TCP illegal function received: %02X\n", functionCode);
-      return Modbus::EX_ILLEGAL_FUNCTION;
+      return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_FUNCTION);
   }  
 
   // Construct affirmative response PDU
@@ -164,13 +241,21 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
+    // pushHreg reads its payload from mbBat's local register map. Mirror the
+    // freshly read battery block before starting the outbound transaction.
+    for (uint16_t i = 0; i < BAT_NR_ADDRESSES; i++) {
+        uint16_t address = BAT_START_ADDRESS + i;
+        uint16_t value = (i == BAT_NR_ADDRESSES - 1) ? val : mbTcp.Hreg(address);
+        mbBat.Hreg(address, value);
+    }
+
     while (true) {
+        mbBat.task();
         if (mbBat.isConnected(mbBatDestination)) {
             result = mbBat.pushHreg(mbBatDestination, BAT_START_ADDRESS, BAT_START_ADDRESS, BAT_NR_ADDRESSES);
-            mbBat.task();
 
             if (result) {
-                LOG_INFO("Battery data transmitted successfully");
+                LOG_INFO("Battery data transmission queued successfully");
                 return val;
             } else {
                 LOG_ERROR("Failed to transmit battery data");
@@ -185,13 +270,7 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
             LOG_ERROR("Connection timeout while transmitting battery data");
             break;
         }
-
-      // Break the loop if the maximum allowed time is exceeded
-      if (millis() - startTime >= 100) {
-          LOG_ERROR("Connection timeout while transmitting battery data");
-          break;
-      }
-      vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
+        vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
     return val;
 }
@@ -245,21 +324,26 @@ void updateTrackingRegisters() {
 }
 
 //----------------------Queue commands-------------------------------------------
-void enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values) {
+bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values) {
+  if (registerCount == 0 || registerCount > MAX_WRITE_VALUES || values == nullptr) {
+    LOG_ERROR("Invalid write command: address=0x%04X, count=%d", address, registerCount);
+    return false;
+  }
+
   WriteCommand command;
   command.address = address;
   command.length = registerCount; // store number of registers
   memcpy(command.values, values, registerCount * sizeof(uint16_t));
-  // Send to queue
-  // Enqueue the command
-  if (xQueueSend(commandQueue, &command, portMAX_DELAY) == pdTRUE) {
+  if (xQueueSend(commandQueue, &command, 0) == pdTRUE) {
     LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
     for (uint16_t i = 0; i < registerCount; i++) {
       LOG_DEBUG(" 0x%04X", values[i]);
     }
+    return true;
   } else {
     Serial.println("Failed to enqueue command.");
     LOG_ERROR("Failed to enqueue command.");
+    return false;
   }
 }
 
@@ -341,7 +425,9 @@ void modbusRTU(void* parameter) {
           LOG_ERROR("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
           writeError++;
           // Re-enqueue the failed command
-          enqueueWriteCommand(command.address, command.length, command.values); // Use enqueueWriteCommand here
+          if (!enqueueWriteCommand(command.address, command.length, command.values)) {
+            LOG_ERROR("Failed to requeue write command at address 0x%04X", command.address);
+          }
         }
 
       // if there is nothing in write_queue, proceed with next read  
@@ -399,7 +485,8 @@ void setup() {
 
   // EEPROM reboot counter
   EEPROM.begin(512); // Allocate 512 bytes of EEPROM (adjust if needed)
-  rebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS); // Read the reboot counter from EEPROM
+  uint32_t storedRebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS);
+  rebootCounter = storedRebootCounter == 0xFFFFFFFFUL ? 0 : static_cast<uint16_t>(storedRebootCounter);
   Serial.printf("Reboot counter stored in eeprom: %d\n", rebootCounter);
   rebootCounter++; // Increment the counter
   EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
@@ -434,9 +521,10 @@ void setup() {
   mbTcp.onRaw(onModbusRequest);           // capture all modbusTCP requests and process in callback
   mbTcp.server(); // Set ESP32 as Modbus TCP server
   mbBat.client();
+  mbBat.addHreg(BAT_START_ADDRESS, 0, BAT_NR_ADDRESSES);
   
   Serial1.begin(BAUD_RATE, SERIAL_8N1, PIN_RX, PIN_TX); // RX = 16, TX = 17
-  mbImeon.begin(MODBUS_RTU_ID, Serial2);
+  mbImeon.begin(MODBUS_RTU_ID, Serial1);
 
   // Iterate through each range and print all individual registers
   for (int i = 0; i < rangeCount; ++i) {

@@ -23,7 +23,7 @@
 #define MODBUS_RTU_ID 1
 #define READ_QUERY_INTERVAL 1000  // milisecs between reads of modbusRTU
 #define WRITE_QUEUE_LENGTH 10  // Maximum number of commands in the queue
-#define MAX_WRITE_VALUES 15       // Maximum number of registers per command
+#define MAX_WRITE_VALUES 5        // Largest write command in IMEON protocol vA.29
 
 #define UNDEF_VALUE 0xFFFF  // value of holding registry considered undefined
 

@@ -85,6 +85,21 @@ So rename secrets1.h to secrets.h and set the right settings
 
 In Arduino Tools I set "Arduino runs on Core0" and 'Events run on Core0"
 
+### ModbusMaster timeout
+
+IMEON protocol vA.29 specifies a response timeout of 10 seconds. The upstream
+`ModbusMaster` library defaults `ku16MBResponseTimeout` to 2000 milliseconds.
+Configure the library timeout to at least 10000 milliseconds; otherwise a slow
+but valid inverter response will be reported as a timeout.
+
+### TCP write validation
+
+The bridge accepts only the writable register addresses and exact function-word
+counts documented by IMEON protocol vA.29. Malformed, partial, oversized and
+undocumented commands are rejected before they reach the RTU bus. A full write
+queue is reported to the TCP client as Modbus exception 0x06 instead of blocking
+the TCP task.
+
 ## Peculiarities of IMEON
 
 Overall modbusRTU is pretty reliable.
