@@ -5,17 +5,56 @@
 #include <ModbusMaster.h>
 #include <WiFi.h>
 #include "esp_system.h"           // ESP framework
-#include <esp_task_wdt.h>         // ESP watchdog
 #include <EEPROM.h>               // for storing reboot counter
+#include <atomic>
 #include <freertos/FreeRTOS.h>    // for multitasking on dedicated cores
 #include <freertos/queue.h>       // write queue management
+
+#ifndef MAX_WRITE_RETRIES
+#define MAX_WRITE_RETRIES 3
+#endif
+#ifndef MAX_REGISTER_UPDATE_VALUES
+#define MAX_REGISTER_UPDATE_VALUES 30
+#endif
+#ifndef REGISTER_UPDATE_QUEUE_LENGTH
+#define REGISTER_UPDATE_QUEUE_LENGTH 16
+#endif
+#ifndef LED_QUEUE_LENGTH
+#define LED_QUEUE_LENGTH 8
+#endif
+#ifndef LED_BLINK_DURATION
+#define LED_BLINK_DURATION 50
+#endif
+#ifndef TCP_TASK_INTERVAL
+#define TCP_TASK_INTERVAL 5
+#endif
+#ifndef WIFI_CHECK_INTERVAL
+#define WIFI_CHECK_INTERVAL 1000
+#endif
+#ifndef DROPPED_WRITE_COUNT
+#define DROPPED_WRITE_COUNT 37112
+#endif
+#ifndef LAST_FAILED_WRITE_ADDRESS
+#define LAST_FAILED_WRITE_ADDRESS 37113
+#endif
+#ifndef LAST_WRITE_RESULT
+#define LAST_WRITE_RESULT 37114
+#endif
+#ifndef TRACKING_REGISTER_COUNT
+#define TRACKING_REGISTER_COUNT (REBOOT_COUNTER - READ_COUNT_H + 1)
+#endif
+
+void requestLedBlink(int led);
 
 // ---------------------- Configuration ----------------------
 // Syslog server configuration
 SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define SYSLOG_FACILITY FAC_USER
 #define LOG_INFO(fmt, ...)    syslog.printf(SYSLOG_FACILITY, PRI_INFO, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); blinkLED(LED_ERR)
+#define LOG_ERROR(fmt, ...)   do { \
+    syslog.printf(SYSLOG_FACILITY, PRI_ERROR, fmt, ##__VA_ARGS__); \
+    requestLedBlink(LED_ERR); \
+  } while (0)
 #define LOG_DEBUG(fmt, ...)   syslog.printf(SYSLOG_FACILITY, PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 // Define Modbus instances
@@ -29,18 +68,30 @@ IPAddress mbBatDestination(10, 0, 20, 220); // IP address of Modbus server to se
 struct WriteCommand {
     uint16_t address;            // Register starting address
     uint16_t length;             // Number of registers to write
+    uint8_t retryCount;          // Number of retries already attempted
     uint16_t values[MAX_WRITE_VALUES];  // Raw register values (each register is 2 bytes)
 };
 
-QueueHandle_t commandQueue;  // Queue handle
+struct RegisterUpdate {
+    uint16_t address;
+    uint16_t length;
+    uint16_t values[MAX_REGISTER_UPDATE_VALUES];
+};
+
+static_assert(MAX_REGISTER_UPDATE_VALUES >= TRACKING_REGISTER_COUNT,
+              "RegisterUpdate must fit the tracking register block");
+
+QueueHandle_t commandQueue;
+QueueHandle_t registerUpdateQueue;
+QueueHandle_t ledQueue;
 
 //--------wifi
 unsigned long wifiReconnectTimer = 0;   // Timer for reconnection attempts
+unsigned long lastWifiCheck = 0;
 
 // Flags and timing variables for asynchronous processing
 bool isRtuTransaction = false;
 unsigned long transactionStartTime = 0;
-unsigned long nextProcessTime = 0;
 unsigned long lastQueryTime = 0;
 
 // Metrics tracking variables
@@ -56,8 +107,10 @@ uint16_t maxWriteTime = 0;    // Max response time for write requests
 uint16_t roundRobinTime = 0;
 uint16_t maxRoundRobinTime = 0;    // Max time to process all set reads
 uint32_t startRoundRobinTime = 0;      // 
-uint16_t statusWifi = 0;
-uint16_t rebootCounter = 0;
+std::atomic<uint16_t> rebootCounter{0};
+uint16_t droppedWriteCount = 0;
+uint16_t lastFailedWriteAddress = 0;
+uint16_t lastWriteResult = 0;
 
 uint32_t tcpTime = 0;
 
@@ -81,7 +134,6 @@ const RegisterRange predefinedRanges[] = {
     {5125, 8}
 };
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
-unsigned long requestStartTime = 0;
 int currentRangeIndex = 0;
 
 // IMEON Modbus protocol vA.29 defines the exact number of words accepted by
@@ -114,7 +166,11 @@ bool isDocumentedWrite(uint16_t address, uint16_t registerCount) {
   return false;
 }
 
-bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values);
+bool enqueueWriteCommand(
+    uint16_t address,
+    uint16_t registerCount,
+    const uint16_t* values,
+    uint8_t retryCount = 0);
 
 Modbus::ResultCode sendTcpException(
     Modbus::frame_arg_t* source,
@@ -134,12 +190,19 @@ Modbus::ResultCode sendTcpException(
   return Modbus::EX_SUCCESS;
 }
 
+void resetRebootCounter() {
+  rebootCounter.store(0);
+  EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, 0);
+  EEPROM.commit();
+  mbTcp.Hreg(REBOOT_COUNTER, 0);
+}
+
 Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) {
   if (data == nullptr || custom == nullptr || length < 1) {
     return Modbus::EX_ILLEGAL_VALUE;
   }
 
-  blinkLED(LED_TRANS);
+  requestLedBlink(LED_TRANS);
   uint8_t functionCode = data[0];
   auto src = (Modbus::frame_arg_t*) custom;
       
@@ -160,10 +223,17 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
         return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
       }
       uint16_t address = (data[1] << 8) | data[2];
+      uint16_t singleRegValue = (data[3] << 8) | data[4];
+      if (address == REBOOT_COUNTER) {
+        if (singleRegValue != 0) {
+          return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+        }
+        resetRebootCounter();
+        break;
+      }
       if (!isDocumentedWrite(address, 1)) {
         return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_ADDRESS);
       }
-      uint16_t singleRegValue = (data[3] << 8) | data[4];
       if (!enqueueWriteCommand(address, 1, &singleRegValue)) {
         return sendTcpException(src, functionCode, Modbus::EX_SLAVE_DEVICE_BUSY);
       }
@@ -183,7 +253,8 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
       if (regs == 0 || regs > MAX_WRITE_VALUES || byteCount != regs * 2 || length != 6 + byteCount) {
         return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
       }
-      if (!isDocumentedWrite(address, regs)) {
+      bool isRebootReset = address == REBOOT_COUNTER && regs == 1;
+      if (!isRebootReset && !isDocumentedWrite(address, regs)) {
         return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_ADDRESS);
       }
 
@@ -193,6 +264,13 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
         Serial.printf(" 0x%04X ", registerValues[i]);
       }
       Serial.println("");
+      if (isRebootReset) {
+        if (registerValues[0] != 0) {
+          return sendTcpException(src, functionCode, Modbus::EX_ILLEGAL_VALUE);
+        }
+        resetRebootCounter();
+        break;
+      }
       if (!enqueueWriteCommand(address, regs, registerValues)) {
         return sendTcpException(src, functionCode, Modbus::EX_SLAVE_DEVICE_BUSY);
       }
@@ -210,8 +288,8 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   response[0] = data[0];                   // Function Code (0x10)
   response[1] = data[1];                   // Starting Address High Byte
   response[2] = data[2];                   // Starting Address Low Byte
-  response[3] = data[3];                   // value of register
-  response[4] = data[4];                   // value of register
+  response[3] = data[3];                   // Value (0x06) or quantity (0x10), high byte
+  response[4] = data[4];                   // Value (0x06) or quantity (0x10), low byte
   // Instantly respond with success to the client
   mbTcp.setTransactionId(src->transactionId);
   uint16_t result = mbTcp.rawResponce(
@@ -228,25 +306,47 @@ Modbus::ResultCode onModbusRequest(uint8_t* data, uint8_t length, void* custom) 
   return Modbus::EX_SUCCESS;
 }
 
-void blinkLED(int led) {
-    digitalWrite(led, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    digitalWrite(led, LOW);
+void requestLedBlink(int led) {
+  if (ledQueue != NULL) {
+    xQueueSend(ledQueue, &led, 0);
+  }
 }
 
-// callback to send info about battery to modbusTCP server 
+void serviceLeds() {
+  static unsigned long errorLedOffAt = 0;
+  static unsigned long transactionLedOffAt = 0;
+  int led = 0;
+  unsigned long now = millis();
+
+  while (xQueueReceive(ledQueue, &led, 0) == pdTRUE) {
+    digitalWrite(led, HIGH);
+    if (led == LED_ERR) {
+      errorLedOffAt = now + LED_BLINK_DURATION;
+    } else if (led == LED_TRANS) {
+      transactionLedOffAt = now + LED_BLINK_DURATION;
+    }
+  }
+
+  if (errorLedOffAt != 0 && static_cast<int32_t>(now - errorLedOffAt) >= 0) {
+    digitalWrite(LED_ERR, LOW);
+    errorLedOffAt = 0;
+  }
+  if (transactionLedOffAt != 0 && static_cast<int32_t>(now - transactionLedOffAt) >= 0) {
+    digitalWrite(LED_TRANS, LOW);
+    transactionLedOffAt = 0;
+  }
+}
+
+// Send battery data to a Modbus TCP server.
 // I use it to send to esp32 controller which reads smartmeter readinngs
 // and answers requests from heatpump
-uint16_t cbBat(TRegister* reg, uint16_t val) {
+void forwardBatteryData(const uint16_t* values) {
     unsigned long startTime = millis();
     uint16_t result = 0;
 
-    // pushHreg reads its payload from mbBat's local register map. Mirror the
-    // freshly read battery block before starting the outbound transaction.
     for (uint16_t i = 0; i < BAT_NR_ADDRESSES; i++) {
         uint16_t address = BAT_START_ADDRESS + i;
-        uint16_t value = (i == BAT_NR_ADDRESSES - 1) ? val : mbTcp.Hreg(address);
-        mbBat.Hreg(address, value);
+        mbBat.Hreg(address, values[i]);
     }
 
     while (true) {
@@ -256,7 +356,7 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
 
             if (result) {
                 LOG_INFO("Battery data transmission queued successfully");
-                return val;
+                return;
             } else {
                 LOG_ERROR("Failed to transmit battery data");
                 break;
@@ -272,7 +372,6 @@ uint16_t cbBat(TRegister* reg, uint16_t val) {
         }
         vTaskDelay(pdMS_TO_TICKS(10)); // Small delay for processing other tasks
     }
-    return val;
 }
 
 Modbus::ResultCode cbPreRequest(Modbus::FunctionCode fc, const Modbus::RequestData data) {
@@ -293,38 +392,61 @@ bool cbConn(IPAddress ip) {
   return true;
 }
 
-uint16_t cbRebootCounter(TRegister* reg, uint16_t val) {
-  // reset counter if REBOOT_COUNTER hreg set to 0
-  if (val == 0) {
-    rebootCounter = 0;
-    EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
-    EEPROM.commit();  // Commit the changes to EEPROM (save them!)
-  } else {
-    val = rebootCounter; // if mbTcp sets value non zero, ignore it
+bool queueRegisterUpdate(uint16_t address, uint16_t length, const uint16_t* values) {
+  if (length == 0 || length > MAX_REGISTER_UPDATE_VALUES || values == nullptr) {
+    LOG_ERROR("Invalid register update: address=0x%04X, count=%d", address, length);
+    return false;
   }
-  return val;
+
+  RegisterUpdate update;
+  update.address = address;
+  update.length = length;
+  memcpy(update.values, values, length * sizeof(uint16_t));
+  if (xQueueSend(registerUpdateQueue, &update, 0) != pdTRUE) {
+    LOG_ERROR("Register update queue full at address 0x%04X", address);
+    return false;
+  }
+  return true;
 }
 
-void updateTrackingRegisters() {
-  // Update metrics and tracking registers
-  mbTcp.Hreg(READ_COUNT_H, highWord(readCount));
-  mbTcp.Hreg(READ_COUNT_L, lowWord(readCount));
-  mbTcp.Hreg(READ_ERROR, readError);
-  mbTcp.Hreg(READ_TIME, readTime);
-  mbTcp.Hreg(MAX_READ_TIME, maxReadTime);
-  mbTcp.Hreg(WRITE_COUNT_H, highWord(writeCount));
-  mbTcp.Hreg(WRITE_COUNT_L, lowWord(writeCount));
-  mbTcp.Hreg(WRITE_ERROR, writeError);
-  mbTcp.Hreg(WRITE_TIME, writeTime);
-  mbTcp.Hreg(MAX_WRITE_TIME, maxWriteTime);
-  mbTcp.Hreg(ROUND_ROBIN_TIME, roundRobinTime / 1000);
-  mbTcp.Hreg(MAX_ROUND_ROBIN_TIME, maxRoundRobinTime / 1000); // max time is in seconds
-  mbTcp.Hreg(WRITE_QUEUE_SIZE, uxQueueMessagesWaiting(commandQueue));
-  mbTcp.Hreg(REBOOT_COUNTER, rebootCounter);
+void queueTrackingRegisters() {
+  uint16_t values[TRACKING_REGISTER_COUNT] = {0};
+  values[READ_COUNT_H - READ_COUNT_H] = highWord(readCount);
+  values[READ_COUNT_L - READ_COUNT_H] = lowWord(readCount);
+  values[READ_ERROR - READ_COUNT_H] = readError;
+  values[READ_TIME - READ_COUNT_H] = readTime;
+  values[MAX_READ_TIME - READ_COUNT_H] = maxReadTime;
+  values[WRITE_COUNT_H - READ_COUNT_H] = highWord(writeCount);
+  values[WRITE_COUNT_L - READ_COUNT_H] = lowWord(writeCount);
+  values[WRITE_ERROR - READ_COUNT_H] = writeError;
+  values[WRITE_TIME - READ_COUNT_H] = writeTime;
+  values[MAX_WRITE_TIME - READ_COUNT_H] = maxWriteTime;
+  values[ROUND_ROBIN_TIME - READ_COUNT_H] = roundRobinTime / 1000;
+  values[MAX_ROUND_ROBIN_TIME - READ_COUNT_H] = maxRoundRobinTime / 1000;
+  values[DROPPED_WRITE_COUNT - READ_COUNT_H] = droppedWriteCount;
+  values[LAST_FAILED_WRITE_ADDRESS - READ_COUNT_H] = lastFailedWriteAddress;
+  values[LAST_WRITE_RESULT - READ_COUNT_H] = lastWriteResult;
+  values[WRITE_QUEUE_SIZE - READ_COUNT_H] = uxQueueMessagesWaiting(commandQueue);
+  values[REBOOT_COUNTER - READ_COUNT_H] = rebootCounter.load();
+  queueRegisterUpdate(READ_COUNT_H, TRACKING_REGISTER_COUNT, values);
+}
+
+void applyRegisterUpdates() {
+  RegisterUpdate update;
+  while (xQueueReceive(registerUpdateQueue, &update, 0) == pdTRUE) {
+    // Apply the entire snapshot before mbTcp.task() can expose it to a client.
+    for (uint16_t i = 0; i < update.length; i++) {
+      mbTcp.Hreg(update.address + i, update.values[i]);
+    }
+  }
 }
 
 //----------------------Queue commands-------------------------------------------
-bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_t* values) {
+bool enqueueWriteCommand(
+    uint16_t address,
+    uint16_t registerCount,
+    const uint16_t* values,
+    uint8_t retryCount) {
   if (registerCount == 0 || registerCount > MAX_WRITE_VALUES || values == nullptr) {
     LOG_ERROR("Invalid write command: address=0x%04X, count=%d", address, registerCount);
     return false;
@@ -333,9 +455,11 @@ bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_
   WriteCommand command;
   command.address = address;
   command.length = registerCount; // store number of registers
+  command.retryCount = retryCount;
   memcpy(command.values, values, registerCount * sizeof(uint16_t));
   if (xQueueSend(commandQueue, &command, 0) == pdTRUE) {
-    LOG_DEBUG("ENQ Enqueued Address: 0x%04X, RegNum: %d, Val(s): ", address, registerCount);
+    LOG_DEBUG("ENQ Address: 0x%04X, RegNum: %d, Retry: %d, Val(s): ",
+              address, registerCount, retryCount);
     for (uint16_t i = 0; i < registerCount; i++) {
       LOG_DEBUG(" 0x%04X", values[i]);
     }
@@ -350,7 +474,6 @@ bool enqueueWriteCommand(uint16_t address, uint16_t registerCount, const uint16_
 
 // Function to connect or reconnect to Wi-Fi
 void manageWiFi() {
-    static bool logsSent = false;
     static unsigned long reconnectAttempts = 0;
     const unsigned long reconnectDelay[] = {5000, 10000, 20000, 40000, 80000}; // in milliseconds
 
@@ -382,8 +505,10 @@ void manageWiFi() {
 void modbusRTU(void* parameter) {
   WriteCommand command;
   uint8_t result = 0;
+  bool readBeforeNextWrite = false;
 
   while (true) {
+    mbBat.task();
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // check if time has passed for next modbusRTU transaction
@@ -391,8 +516,11 @@ void modbusRTU(void* parameter) {
       isRtuTransaction = true;
       transactionStartTime = millis();
 
-      // check if anything sits in write_queue
-      if (xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE) {
+      // After a failed write, force one telemetry read before another write
+      // attempt so a poisoned command cannot monopolize the RTU bus.
+      bool processWrite = !readBeforeNextWrite &&
+          xQueueReceive(commandQueue, &command, pdMS_TO_TICKS(5)) == pdTRUE;
+      if (processWrite) {
         // process write request
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
                       command.address, command.length);
@@ -412,6 +540,7 @@ void modbusRTU(void* parameter) {
         // Check the result
         if (result == 0) {
           writeCount++;
+          lastWriteResult = 0;
           writeTime = millis() - transactionStartTime;
           if (maxWriteTime < writeTime) {
             maxWriteTime = writeTime;
@@ -421,17 +550,33 @@ void modbusRTU(void* parameter) {
           LOG_INFO("  SUCCESS: Written %d register(s) starting at 0x%04X %d, time: %d\n", 
             command.length, command.address, command.address, writeTime);
         } else {
-          Serial.printf("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
-          LOG_ERROR("  ERROR: Write failed with code 0x%02X, requeueing\n", result);
+          Serial.printf("  ERROR: Write failed with code 0x%02X\n", result);
+          LOG_ERROR("  ERROR: Write failed with code 0x%02X\n", result);
           writeError++;
-          // Re-enqueue the failed command
-          if (!enqueueWriteCommand(command.address, command.length, command.values)) {
-            LOG_ERROR("Failed to requeue write command at address 0x%04X", command.address);
+          lastFailedWriteAddress = command.address;
+          lastWriteResult = result;
+          readBeforeNextWrite = true;
+
+          if (command.retryCount < MAX_WRITE_RETRIES) {
+            if (!enqueueWriteCommand(
+                    command.address,
+                    command.length,
+                    command.values,
+                    command.retryCount + 1)) {
+              droppedWriteCount++;
+              LOG_ERROR("Dropping write at 0x%04X because the retry queue is full",
+                        command.address);
+            }
+          } else {
+            droppedWriteCount++;
+            LOG_ERROR("Dropping write at 0x%04X after %d retries",
+                      command.address, command.retryCount);
           }
         }
 
       // if there is nothing in write_queue, proceed with next read  
       } else {
+        readBeforeNextWrite = false;
         // select next range of registers to read
         RegisterRange currentRange = predefinedRanges[currentRangeIndex];
         currentRangeIndex = (currentRangeIndex + 1) % rangeCount; // roll register
@@ -456,11 +601,13 @@ void modbusRTU(void* parameter) {
           }
           LOG_DEBUG("ReadRTU success: 0x%04X %d, length: %d, time: %d :: ", reg, reg, length, readTime);
           Serial.printf("ReadRTU success: 0x%04X %d, length: %d, time: %d\n", reg, reg, length, readTime);
-          // Iterate through the response and print register values
+          uint16_t values[MAX_REGISTER_UPDATE_VALUES];
           for (uint16_t i = 0; i < length; i++) {
-            uint16_t value = mbImeon.getResponseBuffer(i);
-            //LOG_DEBUG(" %d : %d ", reg + i, value);
-            mbTcp.Hreg(reg + i, value);
+            values[i] = mbImeon.getResponseBuffer(i);
+          }
+          queueRegisterUpdate(reg, length, values);
+          if (reg == BAT_START_ADDRESS && length >= BAT_NR_ADDRESSES) {
+            forwardBatteryData(values);
           }
         } else {
           // Handle errors
@@ -471,7 +618,7 @@ void modbusRTU(void* parameter) {
       // finish modbusRTU transaction
       lastQueryTime = millis();
       isRtuTransaction = false;
-      updateTrackingRegisters();
+      queueTrackingRegisters();
     }
   }
 }
@@ -486,10 +633,12 @@ void setup() {
   // EEPROM reboot counter
   EEPROM.begin(512); // Allocate 512 bytes of EEPROM (adjust if needed)
   uint32_t storedRebootCounter = EEPROM.readUInt(EEPROM_REBOOT_COUNTER_ADDRESS);
-  rebootCounter = storedRebootCounter == 0xFFFFFFFFUL ? 0 : static_cast<uint16_t>(storedRebootCounter);
-  Serial.printf("Reboot counter stored in eeprom: %d\n", rebootCounter);
-  rebootCounter++; // Increment the counter
-  EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, rebootCounter); // Write the updated counter back to EEPROM
+  uint16_t currentRebootCounter =
+      storedRebootCounter == 0xFFFFFFFFUL ? 0 : static_cast<uint16_t>(storedRebootCounter);
+  Serial.printf("Reboot counter stored in eeprom: %d\n", currentRebootCounter);
+  currentRebootCounter++; // Increment the counter
+  rebootCounter.store(currentRebootCounter);
+  EEPROM.writeUInt(EEPROM_REBOOT_COUNTER_ADDRESS, currentRebootCounter); // Write the updated counter back to EEPROM
   EEPROM.commit();  // Commit the changes to EEPROM (save them!)
 
   // Initialize WiFi
@@ -538,23 +687,23 @@ void setup() {
   for (uint16_t i = READ_COUNT_H; i <= REBOOT_COUNTER; i++) {
     mbTcp.addHreg(i, 0);
   }
-  mbTcp.onSetHreg(771, cbBat);      // when battery last relevant registry is written, callback will  send it to remote device
-
-  
-  // Initialize the command queue
+  // Initialize inter-core queues before starting the RTU task.
   commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
-  if (commandQueue == NULL) {
-      Serial.println("Error: Failed to create commandQueue.");
-      // Handle the error  by restarting the ESP32
+  registerUpdateQueue = xQueueCreate(REGISTER_UPDATE_QUEUE_LENGTH, sizeof(RegisterUpdate));
+  ledQueue = xQueueCreate(LED_QUEUE_LENGTH, sizeof(int));
+  if (commandQueue == NULL || registerUpdateQueue == NULL || ledQueue == NULL) {
+      Serial.println("Error: Failed to create a FreeRTOS queue.");
       ESP.restart();
   } else {
-      Serial.println("commandQueue successfully created.");
+      Serial.println("FreeRTOS queues successfully created.");
   }
+  queueTrackingRegisters();
+
   // Create the processing task
   xTaskCreatePinnedToCore(
       modbusRTU,                        // Task function
       "ModbusRTUreadWriteCommandTask",  // Name of the task
-      8192,                             // Stack size in words (4096 bytes)
+      8192,                             // Stack size in bytes on ESP-IDF
       NULL,                             // Task input parameter
       1,                                // Priority
       NULL,                             // Task handle
@@ -564,7 +713,16 @@ void setup() {
 }
 
 void loop() {
+  applyRegisterUpdates();
+  serviceLeds();
   mbTcp.task();
-  vTaskDelay(pdMS_TO_TICKS(300));
-  manageWiFi();
+  serviceLeds();
+
+  unsigned long now = millis();
+  if (now - lastWifiCheck >= WIFI_CHECK_INTERVAL) {
+    lastWifiCheck = now;
+    manageWiFi();
+  }
+
+  vTaskDelay(pdMS_TO_TICKS(TCP_TASK_INTERVAL));
 }

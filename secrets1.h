@@ -24,6 +24,13 @@
 #define READ_QUERY_INTERVAL 1000  // milisecs between reads of modbusRTU
 #define WRITE_QUEUE_LENGTH 10  // Maximum number of commands in the queue
 #define MAX_WRITE_VALUES 5        // Largest write command in IMEON protocol vA.29
+#define MAX_WRITE_RETRIES 3       // Retries after the initial write attempt
+#define MAX_REGISTER_UPDATE_VALUES 30  // Largest predefined read range
+#define REGISTER_UPDATE_QUEUE_LENGTH 16
+#define LED_QUEUE_LENGTH 8
+#define LED_BLINK_DURATION 50     // milliseconds
+#define TCP_TASK_INTERVAL 5       // milliseconds
+#define WIFI_CHECK_INTERVAL 1000  // milliseconds
 
 #define UNDEF_VALUE 0xFFFF  // value of holding registry considered undefined
 
@@ -39,10 +46,14 @@
 #define MAX_WRITE_TIME 37109
 #define ROUND_ROBIN_TIME 37110
 #define MAX_ROUND_ROBIN_TIME 37111  // in seconds
+#define DROPPED_WRITE_COUNT 37112
+#define LAST_FAILED_WRITE_ADDRESS 37113
+#define LAST_WRITE_RESULT 37114
 
 #define WRITE_QUEUE_SIZE 37120    // modbusRTU write commands standing in queue
 // counter for monitoring reboots. resets when you set it to zero
 #define REBOOT_COUNTER 37121
+#define TRACKING_REGISTER_COUNT (REBOOT_COUNTER - READ_COUNT_H + 1)
 #define EEPROM_REBOOT_COUNTER_ADDRESS 0
 
 #endif

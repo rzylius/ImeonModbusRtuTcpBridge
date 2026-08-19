@@ -53,8 +53,28 @@ Metrics for monitoring health of esp32 operations:
 * 37109 uint16, maximum write operation duration in ms
 * 37110 uint16, last duration it took to read all registers in the list, in seconds
 * 37111 uint16, maximum time it took to read all the registers, in seconds
+* 37112 uint16, number of write commands dropped after retry exhaustion
+* 37113 uint16, starting address of the last failed write command
+* 37114 uint16, last ModbusMaster write result code (zero after a successful write)
 * 37120 uint16, the number of write operations sitting in the write_queue
 * 37121 uint16, number of times esp32 rebooted. You can set it to zero, non-zero set attempts will be ignored
+
+## Concurrency and write retries
+
+The RTU task never accesses the `mbTcp` register container directly. Completed
+RTU ranges and metric snapshots are sent to core 0 through a FreeRTOS queue.
+Core 0 applies each complete range before calling `mbTcp.task()`, keeping all
+`mbTcp` access on one core and preventing clients from seeing half-updated
+multi-register values.
+
+Failed RTU writes are retried up to `MAX_WRITE_RETRIES` times. A telemetry read
+is forced between retry attempts, so a permanently failing command cannot stop
+the read round-robin indefinitely. Exhausted commands are dropped and reported
+through registers 37112-37114.
+
+The TCP task runs every `TCP_TASK_INTERVAL` milliseconds. LED pulses are queued
+and serviced asynchronously, so request handling and error logging do not pause
+for the LED duration. Wi-Fi health checks run on their own slower interval.
 
 ## Hardware Requirements
 
