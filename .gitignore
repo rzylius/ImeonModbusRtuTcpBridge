@@ -1,2 +1,4 @@
 secrets.h
-
+tools/__pycache__/
+test-results/imeon-operation-monitor.jsonl
+test-results/imeon-operation-status.json
