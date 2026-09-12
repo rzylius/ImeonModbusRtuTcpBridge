@@ -1,0 +1,6 @@
+diff --git a/src/ModbusMaster.h b/src/ModbusMaster.h
+--- a/src/ModbusMaster.h
++++ b/src/ModbusMaster.h
+@@ -252 +252 @@ class ModbusMaster
+-    static const uint16_t ku16MBResponseTimeout          = 2000; ///< Modbus timeout [milliseconds]
++    static const uint16_t ku16MBResponseTimeout          = 10000; ///< IMEON vA.29 timeout [milliseconds]
