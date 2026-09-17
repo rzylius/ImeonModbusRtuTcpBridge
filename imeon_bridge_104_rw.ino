@@ -3,6 +3,9 @@
 #include <SimpleSyslog.h>
 #include <ModbusIP_ESP8266.h>
 #include <ModbusMaster.h>
+#ifndef MODBUSMASTER_STRICT_READ_LENGTH
+#error "Apply patches/ModbusMaster-2.0.1-strict-read-length.patch before building"
+#endif
 #include <WiFi.h>
 #include "esp_system.h"           // ESP framework
 #include <EEPROM.h>               // for storing reboot counter
