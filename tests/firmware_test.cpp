@@ -56,12 +56,74 @@ void exhaustedRetry() {
   assert((commands()==std::vector<uint16_t>{0x4000,0x4000,0x4000,0x4000,0xBFFF}));
   assert(droppedWriteCount==1 && writeError==4 && writeCount==1);
 }
+
+uint32_t batteryAge() {
+  const uint16_t a=FRESHNESS_REGISTER_START+2*4;
+  return (uint32_t(mbTcp.Hreg(a+2))<<16)|mbTcp.Hreg(a+3);
+}
+uint16_t batteryStatus() { return mbTcp.Hreg(FRESHNESS_REGISTER_START+2*4+1); }
+void freshnessAge() {
+  applyRegisterUpdates();
+  assert(batteryStatus()==0 && batteryAge()==UINT32_MAX);
+  uint16_t values[]={530,30,0,80};
+  fake::now=1000;
+  assert(queueRegisterUpdate(0x0300,4,values));
+  fake::now=2000; applyRegisterUpdates();
+  assert(batteryStatus()==3 && batteryAge()==1000);
+  fake::now=1000+TELEMETRY_STALE_AFTER_MS; applyRegisterUpdates();
+  assert(batteryStatus()==3);
+  fake::now++; applyRegisterUpdates();
+  assert(batteryStatus()==1 && mbTcp.Hreg(0x0303)==80);
+  assert(queueRegisterUpdate(0x0300,4,values)); applyRegisterUpdates();
+  assert(batteryStatus()==3 && batteryAge()==0);
+}
+void freshnessWrap() {
+  uint16_t values[]={530,30,0,80};
+  fake::now=UINT32_MAX-100;
+  assert(queueRegisterUpdate(0x0300,4,values)); applyRegisterUpdates();
+  fake::now=50; applyRegisterUpdates();
+  assert(batteryAge()==151 && batteryStatus()==3);
+  fake::now=UINT32_MAX-10; applyRegisterUpdates();
+  assert(batteryAge()==UINT32_MAX && batteryStatus()==1);
+  fake::now=100; applyRegisterUpdates();
+  assert(batteryAge()==UINT32_MAX && batteryStatus()==1);
+}
+void freshnessRejected() {
+  int batteryReads=0;
+  fake::onRead=[&](uint16_t a,std::vector<uint16_t>& v) {
+    if(a==0x0300) v={uint16_t(++batteryReads==1 ? 530 : 900),30,0,80};
+    return uint8_t(0);
+  };
+  runFor(160000);
+  assert(batteryReads>2 && invalidReadCount==batteryReads-1);
+  assert(batteryStatus()==1 && mbTcp.Hreg(0x0300)==530);
+  size_t reads=0;
+  for(auto& op:fake::operations) if(!op.write) reads++;
+  assert(readCount==reads-invalidReadCount);
+}
+void freshnessFailedAndDropped() {
+  uint16_t values[]={530,30,0,80};
+  assert(queueRegisterUpdate(0x0300,4,values)); applyRegisterUpdates();
+  fake::onRead=[](uint16_t,std::vector<uint16_t>&) { return uint8_t(0xE2); };
+  runFor(130000);
+  assert(batteryStatus()==1 && readCount==0 && readError>0);
+  const auto age=batteryAge();
+  for(int i=0;i<REGISTER_UPDATE_QUEUE_LENGTH;i++)
+    assert(queueRegisterUpdate(40000,1,values));
+  assert(!queueRegisterUpdate(0x0300,4,values));
+  applyRegisterUpdates();
+  assert(batteryStatus()==1 && batteryAge()==age);
+}
 int main(int argc,char** argv) {
   assert(argc==2); setup();
   std::string test=argv[1];
   if(test=="ordered_retry") orderedRetry();
   else if(test=="full_queue_retry") fullQueueRetry();
   else if(test=="exhausted_retry") exhaustedRetry();
+  else if(test=="freshness_age") freshnessAge();
+  else if(test=="freshness_wrap") freshnessWrap();
+  else if(test=="freshness_rejected") freshnessRejected();
+  else if(test=="freshness_failed_dropped") freshnessFailedAndDropped();
   else return 2;
   printf("PASS %s\n",argv[1]);
 }

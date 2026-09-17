@@ -18,7 +18,9 @@ def main():
             "-Wno-unused-variable", "-I", str(ROOT / "tests/fakes"),
             "-I", str(tmp), str(ROOT / "tests/firmware_test.cpp"), "-o", str(binary),
         ], check=True)
-        for case in ("ordered_retry", "full_queue_retry", "exhausted_retry"):
+        for case in ("ordered_retry", "full_queue_retry", "exhausted_retry",
+                     "freshness_age", "freshness_wrap", "freshness_rejected",
+                     "freshness_failed_dropped"):
             subprocess.run([str(binary), case], check=True)
 
 

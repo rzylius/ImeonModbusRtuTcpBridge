@@ -71,6 +71,12 @@
 #ifndef TRACKING_REGISTER_COUNT
 #define TRACKING_REGISTER_COUNT (REBOOT_COUNTER - READ_COUNT_H + 1)
 #endif
+#ifndef FRESHNESS_REGISTER_START
+#define FRESHNESS_REGISTER_START 37130
+#endif
+#ifndef TELEMETRY_STALE_AFTER_MS
+#define TELEMETRY_STALE_AFTER_MS 120000UL
+#endif
 
 void requestLedBlink(int led);
 void queueLog(uint8_t priority, const char* format, ...);
@@ -112,6 +118,7 @@ struct WriteCommand {
 struct RegisterUpdate {
     uint16_t address;
     uint16_t length;
+    uint32_t capturedAt;
     uint16_t values[MAX_REGISTER_UPDATE_VALUES];
 };
 
@@ -245,6 +252,38 @@ const RegisterRange predefinedRanges[] = {
 };
 const int rangeCount = sizeof(predefinedRanges) / sizeof(predefinedRanges[0]); // Get the size of the array
 int currentRangeIndex = 0;
+
+// Owned by core 0. Age saturates instead of becoming fresh after millis wraps.
+struct RangeFreshness {
+  bool seen = false;
+  uint32_t ageMs = UINT32_MAX;
+};
+RangeFreshness rangeFreshness[rangeCount];
+uint32_t lastFreshnessTick = 0;
+
+void ageTelemetry(uint32_t now) {
+  const uint32_t elapsed = now - lastFreshnessTick;
+  lastFreshnessTick = now;
+  for (auto& freshness : rangeFreshness) {
+    if (freshness.seen) {
+      freshness.ageMs = elapsed > UINT32_MAX - freshness.ageMs
+          ? UINT32_MAX : freshness.ageMs + elapsed;
+    }
+  }
+}
+
+void publishFreshness() {
+  for (int i = 0; i < rangeCount; i++) {
+    const auto& freshness = rangeFreshness[i];
+    const uint16_t address = FRESHNESS_REGISTER_START + i * 4;
+    const uint16_t status = !freshness.seen ? 0 :
+        (freshness.ageMs <= TELEMETRY_STALE_AFTER_MS ? 3 : 1);
+    mbTcp.Hreg(address, predefinedRanges[i].start);
+    mbTcp.Hreg(address + 1, status);
+    mbTcp.Hreg(address + 2, highWord(freshness.ageMs));
+    mbTcp.Hreg(address + 3, lowWord(freshness.ageMs));
+  }
+}
 
 enum InvalidReadReason : uint16_t {
   INVALID_NONE = 0,
@@ -696,6 +735,7 @@ bool queueRegisterUpdate(uint16_t address, uint16_t length, const uint16_t* valu
   RegisterUpdate update;
   update.address = address;
   update.length = length;
+  update.capturedAt = millis();
   memcpy(update.values, values, length * sizeof(uint16_t));
   if (xQueueSend(registerUpdateQueue, &update, 0) != pdTRUE) {
     LOG_ERROR("Register update queue full at address 0x%04X", address);
@@ -731,6 +771,8 @@ void queueTrackingRegisters() {
 }
 
 void applyRegisterUpdates() {
+  const uint32_t now = millis();
+  ageTelemetry(now);
   RegisterUpdate update;
   while (xQueueReceive(registerUpdateQueue, &update, 0) == pdTRUE) {
     // Apply the entire snapshot before mbTcp.task() can expose it to a client.
@@ -739,7 +781,16 @@ void applyRegisterUpdates() {
       uint16_t value = address == REBOOT_COUNTER ? rebootCounter.load() : update.values[i];
       mbTcp.Hreg(address, value);
     }
+    for (int i = 0; i < rangeCount; i++) {
+      if (update.address == predefinedRanges[i].start &&
+          update.length == predefinedRanges[i].length) {
+        rangeFreshness[i].seen = true;
+        rangeFreshness[i].ageMs = now - update.capturedAt;
+        break;
+      }
+    }
   }
+  publishFreshness();
 }
 
 //----------------------Queue commands-------------------------------------------
@@ -941,7 +992,6 @@ void modbusRTU(void* parameter) {
         result = mbImeon.readHoldingRegisters(reg, length);
         
         if (result == 0) {
-          readCount++;
           readTime = millis() - transactionStartTime;
           if (maxReadTime < readTime) {
             maxReadTime = readTime;
@@ -954,7 +1004,9 @@ void modbusRTU(void* parameter) {
           }
           const uint16_t invalidReason = validateTelemetryRange(reg, length, values);
           if (invalidReason == INVALID_NONE) {
-            queueRegisterUpdate(reg, length, values);
+            if (queueRegisterUpdate(reg, length, values)) {
+              readCount++;
+            }
             if (reg == BAT_START_ADDRESS && length >= BAT_NR_ADDRESSES) {
               forwardBatteryData(values);
             }
@@ -1045,6 +1097,8 @@ void setup() {
   for (uint16_t i = READ_COUNT_H; i <= REBOOT_COUNTER; i++) {
     mbTcp.addHreg(i, 0);
   }
+  mbTcp.addHreg(FRESHNESS_REGISTER_START, 0, rangeCount * 4);
+  publishFreshness();
   // Initialize inter-core queues before starting the RTU task.
   commandQueue = xQueueCreate(WRITE_QUEUE_LENGTH, sizeof(WriteCommand));
   registerUpdateQueue = xQueueCreate(REGISTER_UPDATE_QUEUE_LENGTH, sizeof(RegisterUpdate));
