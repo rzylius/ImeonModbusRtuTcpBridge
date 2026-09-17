@@ -1,0 +1,40 @@
+--- a/src/ModbusMaster.h
++++ b/src/ModbusMaster.h
+@@ -34,6 +34,9 @@
+   
+ #ifndef ModbusMaster_h
+ #define ModbusMaster_h
++
++// Bridge builds require exact register-response byte counts.
++#define MODBUSMASTER_STRICT_READ_LENGTH 1
+ 
+ 
+ /**
+@@ -187,6 +190,7 @@
+     @ingroup constant
+     */
+     static const uint8_t ku8MBInvalidCRC                 = 0xE3;
++    static const uint8_t ku8MBInvalidResponseLength = 0xE4;
+     
+     uint16_t getResponseBuffer(uint8_t);
+     void     clearResponseBuffer();
+--- a/src/ModbusMaster.cpp
++++ b/src/ModbusMaster.cpp
+@@ -774,6 +774,17 @@
+         break;
+       }
+       
++      // Reject short, odd and oversized register responses before accepting
++      // any payload. Otherwise missing words retain old response-buffer data.
++      if ((u8MBFunction == ku8MBReadHoldingRegisters ||
++           u8MBFunction == ku8MBReadInputRegisters ||
++           u8MBFunction == ku8MBReadWriteMultipleRegisters) &&
++          u8ModbusADU[2] != _u16ReadQty * 2)
++      {
++        u8MBStatus = ku8MBInvalidResponseLength;
++        break;
++      }
++
+       // evaluate returned Modbus function code
+       switch(u8ModbusADU[1])
+       {

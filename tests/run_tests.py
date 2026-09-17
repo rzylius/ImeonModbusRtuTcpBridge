@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 """Build and run the firmware simulation without hardware or real secrets."""
+import argparse
 from pathlib import Path
+import sys
 import shutil
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+from prepare_modbusmaster import DEFAULT_SOURCE, prepare
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--modbusmaster", type=Path, default=DEFAULT_SOURCE)
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="imeon-host-tests-") as tmp:
         tmp = Path(tmp)
+        for pattern in ("*.ino", "*.h"):
+            for source in ROOT.glob(pattern):
+                if source.name != "secrets.h":
+                    shutil.copy2(source, tmp / source.name)
         shutil.copy2(ROOT / "secrets1.h", tmp / "secrets.h")
         binary = tmp / "firmware_test"
         subprocess.run([
@@ -22,6 +33,14 @@ def main():
                      "freshness_age", "freshness_wrap", "freshness_rejected",
                      "freshness_failed_dropped"):
             subprocess.run([str(binary), case], check=True)
+        library = prepare(args.modbusmaster, tmp / "ModbusMaster")
+        rtu_binary = tmp / "rtu_response_test"
+        subprocess.run([
+            "g++", "-std=c++17", "-I", str(ROOT / "tests/rtu_fakes"),
+            "-I", str(library / "src"), str(ROOT / "tests/rtu_response_test.cpp"),
+            str(library / "src/ModbusMaster.cpp"), "-o", str(rtu_binary),
+        ], check=True)
+        subprocess.run([str(rtu_binary)], check=True)
 
 
 if __name__ == "__main__":

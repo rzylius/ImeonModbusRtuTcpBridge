@@ -7,4 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tests/run_tests.py
+      - uses: actions/checkout@v4
+        with:
+          repository: 4-20ma/ModbusMaster
+          ref: v2.0.1
+          path: vendor-test/ModbusMaster
+      - run: python3 tests/run_tests.py --modbusmaster vendor-test/ModbusMaster

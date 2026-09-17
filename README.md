@@ -153,12 +153,23 @@ IMEON protocol vA.29 specifies a response timeout of 10 seconds. The upstream
 Configure the library timeout to at least 10000 milliseconds; otherwise a slow
 but valid inverter response will be reported as a timeout.
 
-For ModbusMaster 2.0.1, apply the checked-in patch from the library root before
-building:
+For ModbusMaster 2.0.1, apply both checked-in patches from the library root before
+building. The second patch rejects register responses whose byte count differs
+from the requested count (RTU result `0xE4`). Clearing the response buffer alone
+does not fix this: it would substitute zeros for missing data.
 
 ```sh
 patch -p1 < /path/to/ImeonModbusRtuTcpBridge/patches/ModbusMaster-2.0.1-imeon-timeout.patch
+patch -p1 < /path/to/ImeonModbusRtuTcpBridge/patches/ModbusMaster-2.0.1-strict-read-length.patch
 ```
+
+The sketch fails compilation when the strict-length patch marker is absent.
+`python3 tools/build_firmware.py` copies the installed ModbusMaster 2.0.1 library,
+applies any missing patches in a temporary directory, and compiles with the public
+placeholder configuration. It does not modify installed libraries or upload
+firmware. Pass `--modbusmaster /path/to/ModbusMaster` to select the library source.
+The same option is available on `tests/run_tests.py`, which also tests the real
+patched parser with complete, malformed, CRC-invalid, and recovery responses.
 
 The bridge sends the activation key from `IMEON_ACTIVATION_KEY_BYTES` in the
 ignored `secrets.h` before starting telemetry reads. The public `secrets1.h`

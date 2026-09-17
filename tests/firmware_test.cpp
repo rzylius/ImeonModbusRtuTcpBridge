@@ -1,6 +1,6 @@
 // Run the actual sketch with deterministic RTU, time and FreeRTOS queue fakes.
 #include <cassert>
-#include "../imeon_bridge_104_rw.ino"
+#include "imeon_bridge_104_rw.ino"
 
 void runFor(uint32_t ms) {
   fake::stopAt = fake::now + ms;
