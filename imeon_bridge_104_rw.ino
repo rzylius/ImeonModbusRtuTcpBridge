@@ -1,7 +1,7 @@
 #include "secrets.h"
 
 #include <SimpleSyslog.h>
-#include <ModbusIP_ESP8266.h>
+#include "BridgeModbusServer.h"
 #include <ModbusMaster.h>
 #ifndef MODBUSMASTER_STRICT_READ_LENGTH
 #error "Apply patches/ModbusMaster-2.0.1-strict-read-length.patch before building"
@@ -109,7 +109,7 @@ SimpleSyslog syslog(SYSLOG_NAME, HOSTNAME, SYSLOG_SERVER_IP);
 #define LOG_DEBUG(fmt, ...)   queueLog(PRI_DEBUG, fmt, ##__VA_ARGS__)
 
 // Define Modbus instances
-ModbusIP mbTcp;
+BridgeModbusServer mbTcp;
 ModbusMaster mbImeon;
 ModbusIP mbBat;
 
@@ -193,12 +193,12 @@ bool queueTcpResponse(
 void serviceTcpResponses() {
   TcpResponse response;
   while (xQueueReceive(tcpResponseQueue, &response, 0) == pdTRUE) {
-    mbTcp.setTransactionId(response.transactionId);
-    if (!mbTcp.rawResponce(
+    if (!mbTcp.sendServerResponse(
             response.ip,
+            response.transactionId,
+            response.unitId,
             response.payload,
-            response.length,
-            response.unitId)) {
+            response.length)) {
       LOG_ERROR("Failed to send deferred TCP response");
     }
   }

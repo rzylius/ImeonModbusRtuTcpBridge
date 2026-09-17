@@ -98,8 +98,11 @@ complete cached range intact. PV values up to 20 kW and 1,000 V remain visible
 for operational anomaly diagnosis; the filter is not an alarm threshold.
 
 Syslog messages and custom TCP responses are also queued for core 0. In
-particular, callbacks do not call `rawResponce()` reentrantly while
-`mbTcp.task()` owns the active request frame.
+particular, callbacks do not send responses reentrantly while `mbTcp.task()`
+owns the active request frame. `BridgeModbusServer` sends deferred replies over
+the existing server connection and echoes the original transaction ID, including
+zero. It bypasses the library client transaction allocator, which reserves zero.
+The adapter is compiled and tested with modbus-esp8266 4.1.0.
 
 Failed RTU writes are retried up to `MAX_WRITE_RETRIES` times. The RTU task keeps
 the failed command in a dedicated retry slot ahead of newer commands, preserving

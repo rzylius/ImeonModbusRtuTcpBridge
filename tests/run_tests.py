@@ -31,7 +31,8 @@ def main():
         ], check=True)
         for case in ("ordered_retry", "full_queue_retry", "exhausted_retry",
                      "freshness_age", "freshness_wrap", "freshness_rejected",
-                     "freshness_failed_dropped", "sustained_writes"):
+                     "freshness_failed_dropped", "sustained_writes",
+                     "tcp_transaction_ids", "tcp_send_failures"):
             subprocess.run([str(binary), case], check=True)
         library = prepare(args.modbusmaster, tmp / "ModbusMaster")
         rtu_binary = tmp / "rtu_response_test"

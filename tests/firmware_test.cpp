@@ -135,6 +135,41 @@ void sustainedWrites() {
   assert(ranges.size()>=size_t(rangeCount));
   for(size_t i=0;i<ranges.size();i++) assert(ranges[i]==predefinedRanges[i%rangeCount].start);
 }
+void tcpTransactionIds() {
+  for(uint16_t id : {0,1,32768,65535}) {
+    Modbus::frame_arg_t source={7,0x7f000001,id,true};
+    uint8_t single[]={6,0x13,6,0xBF,0xFF};
+    auto before=mbTcp.socket.frames.size();
+    assert(onModbusRequest(single,sizeof(single),&source)==Modbus::EX_SUCCESS);
+    assert(mbTcp.socket.frames.size()==before); // Deferred, never reentrant.
+    serviceTcpResponses();
+    assert((mbTcp.socket.frames.back()==std::vector<uint8_t>{
+      uint8_t(id>>8),uint8_t(id),0,0,0,6,7,6,0x13,6,0xBF,0xFF}));
+    uint8_t multiple[]={0x10,0x13,6,0,1,2,0xBF,0xFF};
+    assert(onModbusRequest(multiple,sizeof(multiple),&source)==Modbus::EX_SUCCESS);
+    serviceTcpResponses();
+    assert((mbTcp.socket.frames.back()==std::vector<uint8_t>{
+      uint8_t(id>>8),uint8_t(id),0,0,0,6,7,0x10,0x13,6,0,1}));
+    uint8_t illegal[]={0x7f};
+    assert(onModbusRequest(illegal,sizeof(illegal),&source)==Modbus::EX_SUCCESS);
+    serviceTcpResponses();
+    assert((mbTcp.socket.frames.back()==std::vector<uint8_t>{
+      uint8_t(id>>8),uint8_t(id),0,0,0,3,7,0xff,1}));
+  }
+}
+void tcpSendFailures() {
+  uint8_t pdu[]={0x86,3};
+  mbTcp.socket.live=false;
+  assert(!mbTcp.sendServerResponse(IPAddress(1),0,7,pdu,2));
+  assert(mbTcp.socket.frames.empty());
+  mbTcp.socket.live=true; mbTcp.socket.writeLimit=4;
+  assert(!mbTcp.sendServerResponse(IPAddress(1),0,7,pdu,2));
+  mbTcp.socket.writeLimit=SIZE_MAX;
+  assert(!mbTcp.sendServerResponse(IPAddress(1),0,7,nullptr,2));
+  assert(!mbTcp.sendServerResponse(IPAddress(1),0,7,pdu,0));
+  assert(!mbTcp.sendServerResponse(IPAddress(1),0,7,pdu,6));
+  assert(mbTcp.sendServerResponse(IPAddress(1),0,7,pdu,2));
+}
 int main(int argc,char** argv) {
   assert(argc==2); setup();
   std::string test=argv[1];
@@ -146,6 +181,8 @@ int main(int argc,char** argv) {
   else if(test=="freshness_rejected") freshnessRejected();
   else if(test=="freshness_failed_dropped") freshnessFailedAndDropped();
   else if(test=="sustained_writes") sustainedWrites();
+  else if(test=="tcp_transaction_ids") tcpTransactionIds();
+  else if(test=="tcp_send_failures") tcpSendFailures();
   else return 2;
   printf("PASS %s\n",argv[1]);
 }

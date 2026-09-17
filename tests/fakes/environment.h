@@ -112,7 +112,23 @@ struct Modbus {
   struct RequestData {};
   struct frame_arg_t { uint8_t unitId; uint32_t ipaddr; uint16_t transactionId; bool server; };
 };
+struct FakeTcpClient {
+  bool live = true;
+  size_t writeLimit = SIZE_MAX;
+  std::vector<std::vector<uint8_t>> frames;
+  bool connected() const { return live; }
+  size_t write(const uint8_t* data, size_t length) {
+    const size_t sent = std::min(length, writeLimit);
+    frames.emplace_back(data, data + sent);
+    return sent;
+  }
+};
 class ModbusIP: public Modbus {
+public:
+  FakeTcpClient socket;
+protected:
+  FakeTcpClient* tcpclient[1] = {&socket};
+  int8_t getMaster(IPAddress) { return socket.live ? 0 : -1; }
 public:
   std::map<uint16_t,uint16_t> registers;
   void Hreg(uint16_t a,uint16_t v) { registers[a]=v; }
