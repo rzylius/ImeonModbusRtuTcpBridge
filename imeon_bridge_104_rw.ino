@@ -44,6 +44,11 @@
 #ifndef MIN_WRITE_INTERVAL
 #define MIN_WRITE_INTERVAL 1100
 #endif
+#ifndef MAX_CONSECUTIVE_WRITES
+#define MAX_CONSECUTIVE_WRITES 2
+#endif
+static_assert(MAX_CONSECUTIVE_WRITES > 0 && MAX_CONSECUTIVE_WRITES <= 255,
+              "MAX_CONSECUTIVE_WRITES must be between 1 and 255");
 #ifndef METER_CONTROL_MIN_INTERVAL
 #define METER_CONTROL_MIN_INTERVAL 2000
 #endif
@@ -883,6 +888,7 @@ void modbusRTU(void* parameter) {
   WriteCommand command;
   uint8_t result = 0;
   bool readBeforeNextWrite = false;
+  uint8_t consecutiveWrites = 0;
   bool imeonActivated = false;
   bool activationAttempted = false;
   unsigned long lastActivationAttempt = 0;
@@ -913,7 +919,7 @@ void modbusRTU(void* parameter) {
       // After a failed write, force one telemetry read before another write
       // attempt so a poisoned command cannot monopolize the RTU bus.
       bool processWrite = false;
-      if (!readBeforeNextWrite &&
+      if (!readBeforeNextWrite && consecutiveWrites < MAX_CONSECUTIVE_WRITES &&
           (writeRetryPending || xQueuePeek(commandQueue, &command, 0) == pdTRUE)) {
         unsigned long requiredInterval = isMeterControlWrite(command.address)
             ? METER_CONTROL_MIN_INTERVAL
@@ -928,6 +934,7 @@ void modbusRTU(void* parameter) {
         }
       }
       if (processWrite) {
+        consecutiveWrites++;
         // process write request
         Serial.printf("  DEQ: Processing: Address=0x%04X, RegNum=%d, Val(s)",
                       command.address, command.length);
@@ -978,6 +985,7 @@ void modbusRTU(void* parameter) {
       // if there is nothing in write_queue, proceed with next read  
       } else {
         readBeforeNextWrite = false;
+        consecutiveWrites = 0;
         // select next range of registers to read
         RegisterRange currentRange = predefinedRanges[currentRangeIndex];
         currentRangeIndex = (currentRangeIndex + 1) % rangeCount; // roll register

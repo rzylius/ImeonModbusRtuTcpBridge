@@ -114,6 +114,27 @@ void freshnessFailedAndDropped() {
   applyRegisterUpdates();
   assert(batteryStatus()==1 && batteryAge()==age);
 }
+void sustainedWrites() {
+  enqueue(0xBFFF);
+  fake::onWrite=[](uint16_t a,const std::vector<uint16_t>&) {
+    if(a==0x1306) enqueue(0xBFFF); // The producer never lets the queue empty.
+    return uint8_t(0);
+  };
+  runFor(50000);
+  size_t consecutive=0, maximum=0;
+  std::vector<uint16_t> ranges;
+  for(auto& op:fake::operations) {
+    if(op.write && op.address==0x1306) {
+      maximum=std::max(maximum,++consecutive);
+    } else if(!op.write) {
+      consecutive=0; ranges.push_back(op.address);
+    }
+  }
+  assert(writeCount>10 && uxQueueMessagesWaiting(commandQueue)==1);
+  assert(maximum==MAX_CONSECUTIVE_WRITES);
+  assert(ranges.size()>=size_t(rangeCount));
+  for(size_t i=0;i<ranges.size();i++) assert(ranges[i]==predefinedRanges[i%rangeCount].start);
+}
 int main(int argc,char** argv) {
   assert(argc==2); setup();
   std::string test=argv[1];
@@ -124,6 +145,7 @@ int main(int argc,char** argv) {
   else if(test=="freshness_wrap") freshnessWrap();
   else if(test=="freshness_rejected") freshnessRejected();
   else if(test=="freshness_failed_dropped") freshnessFailedAndDropped();
+  else if(test=="sustained_writes") sustainedWrites();
   else return 2;
   printf("PASS %s\n",argv[1]);
 }
