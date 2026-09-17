@@ -80,10 +80,17 @@ Syslog messages and custom TCP responses are also queued for core 0. In
 particular, callbacks do not call `rawResponce()` reentrantly while
 `mbTcp.task()` owns the active request frame.
 
-Failed RTU writes are retried up to `MAX_WRITE_RETRIES` times. A telemetry read
-is forced between retry attempts, so a permanently failing command cannot stop
-the read round-robin indefinitely. Exhausted commands are dropped and reported
-through registers 37112-37114.
+Failed RTU writes are retried up to `MAX_WRITE_RETRIES` times. The RTU task keeps
+the failed command in a dedicated retry slot ahead of newer commands, preserving
+write order even when the incoming queue fills. A telemetry read is forced
+between retry attempts. Exhausted commands are dropped and reported through
+registers 37112-37114. Register 37120 includes the pending retry as well as queued
+commands (up to `WRITE_QUEUE_LENGTH + 1`, excluding an in-flight transaction).
+
+Run `python3 tests/run_tests.py` for deterministic host regression tests. These
+compile the actual sketch against simulated RTU, clock, and FreeRTOS queue
+interfaces; they do not connect to an inverter. Tests cover ordered retries,
+queue saturation during a failed transaction, and progress after exhaustion.
 
 The TCP task runs every `TCP_TASK_INTERVAL` milliseconds. LED pulses are queued
 and serviced asynchronously, so request handling and error logging do not pause
