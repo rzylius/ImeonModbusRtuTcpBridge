@@ -219,6 +219,8 @@ uint16_t invalidReadCount = 0;
 uint16_t lastInvalidReadAddress = 0;
 uint16_t lastInvalidReadReason = 0;
 unsigned long lastWriteCompletedAt = 0;
+// RTU-task-owned retry slot: never put an older command behind newer writes.
+bool writeRetryPending = false;
 
 uint32_t tcpTime = 0;
 
@@ -722,7 +724,8 @@ void queueTrackingRegisters() {
   values[INVALID_READ_COUNT - READ_COUNT_H] = invalidReadCount;
   values[LAST_INVALID_READ_ADDRESS - READ_COUNT_H] = lastInvalidReadAddress;
   values[LAST_INVALID_READ_REASON - READ_COUNT_H] = lastInvalidReadReason;
-  values[WRITE_QUEUE_SIZE - READ_COUNT_H] = uxQueueMessagesWaiting(commandQueue);
+  values[WRITE_QUEUE_SIZE - READ_COUNT_H] =
+      uxQueueMessagesWaiting(commandQueue) + (writeRetryPending ? 1 : 0);
   values[REBOOT_COUNTER - READ_COUNT_H] = rebootCounter.load();
   queueRegisterUpdate(READ_COUNT_H, TRACKING_REGISTER_COUNT, values);
 }
@@ -856,12 +859,18 @@ void modbusRTU(void* parameter) {
       // After a failed write, force one telemetry read before another write
       // attempt so a poisoned command cannot monopolize the RTU bus.
       bool processWrite = false;
-      if (!readBeforeNextWrite && xQueuePeek(commandQueue, &command, 0) == pdTRUE) {
+      if (!readBeforeNextWrite &&
+          (writeRetryPending || xQueuePeek(commandQueue, &command, 0) == pdTRUE)) {
         unsigned long requiredInterval = isMeterControlWrite(command.address)
             ? METER_CONTROL_MIN_INTERVAL
             : MIN_WRITE_INTERVAL;
         if (millis() - lastWriteCompletedAt > requiredInterval) {
-          processWrite = xQueueReceive(commandQueue, &command, 0) == pdTRUE;
+          if (writeRetryPending) {
+            processWrite = true;
+            writeRetryPending = false;
+          } else {
+            processWrite = xQueueReceive(commandQueue, &command, 0) == pdTRUE;
+          }
         }
       }
       if (processWrite) {
@@ -903,15 +912,8 @@ void modbusRTU(void* parameter) {
           readBeforeNextWrite = true;
 
           if (command.retryCount < MAX_WRITE_RETRIES) {
-            if (!enqueueWriteCommand(
-                    command.address,
-                    command.length,
-                    command.values,
-                    command.retryCount + 1)) {
-              droppedWriteCount++;
-              LOG_ERROR("Dropping write at 0x%04X because the retry queue is full",
-                        command.address);
-            }
+            command.retryCount++;
+            writeRetryPending = true;
           } else {
             droppedWriteCount++;
             LOG_ERROR("Dropping write at 0x%04X after %d retries",
