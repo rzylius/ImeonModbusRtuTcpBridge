@@ -43,7 +43,7 @@ of 10sec, so I find it not optimal to implement synchronuous RTU-TCP bridge
 
 Metrics for monitoring health of esp32 operations:
 
-* 37100 uint32, number of RTU read operations
+* 37100 uint32, number of validated RTU ranges queued for cache publication
 * 37102 uint16, number of RTU read errors
 * 37103 uint16, last read operation duration in ms
 * 37104 uint16, maximum read operation duration in ms
@@ -62,6 +62,27 @@ Metrics for monitoring health of esp32 operations:
   `3` battery SOC, `4` PV power, `5` PV voltage, `6` PV current)
 * 37120 uint16, the number of write operations sitting in the write_queue
 * 37121 uint16, number of times esp32 rebooted. You can set it to zero, non-zero set attempts will be ignored
+
+## Telemetry freshness
+
+Registers 37130–37169 contain ten four-word freshness records, in the same order
+as `predefinedRanges`: grid, output, battery, PV, faults, clock, injection limit,
+battery settings, operating mode, and grouped battery thresholds. Each record is:
+
+| Offset | Meaning |
+|---|---|
+| +0 | Starting address of the telemetry range |
+| +1 | Status: `0` never published, `1` published but stale, `3` published and fresh |
+| +2, +3 | Unsigned 32-bit age in milliseconds, high word first |
+
+Age includes time waiting in the inter-core queue and saturates at `0xFFFFFFFF`;
+that value also denotes an unseen range. Fresh means age is at most
+`TELEMETRY_STALE_AFTER_MS` (default 120,000 ms). The status and age are updated on
+core 0 with the cached range before servicing TCP requests. Failed, rejected, or
+dropped updates never refresh the range. Old values remain available for diagnosis;
+control consumers must require status `3` for every range they rely on. The global
+read counter counts validated, successfully queued ranges, not rejected snapshots,
+and cannot establish freshness of an individual range.
 
 ## Concurrency and write retries
 
