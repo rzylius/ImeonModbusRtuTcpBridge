@@ -27,8 +27,8 @@ of 10sec, so I find it not optimal to implement synchronuous RTU-TCP bridge
   (local registers are updated by read routine).
 - TCP write requests receive immediate response SUCCESS, and are stored in
   the write queue
-- esp32 processes the write queue as priority - - reading stops until write queue is empty
-- if write requests fails, write request is written in the write queue again (tbd)
+- esp32 prioritizes writes, but forces a telemetry read after at most two write attempts
+- failed writes stay ahead of newer writes and have bounded retries, with a read between attempts
 
 
 ## Features
@@ -104,7 +104,11 @@ particular, callbacks do not call `rawResponce()` reentrantly while
 Failed RTU writes are retried up to `MAX_WRITE_RETRIES` times. The RTU task keeps
 the failed command in a dedicated retry slot ahead of newer commands, preserving
 write order even when the incoming queue fills. A telemetry read is forced
-between retry attempts. Exhausted commands are dropped and reported through
+between retry attempts. Successful traffic is also bounded: after at most
+`MAX_CONSECUTIVE_WRITES` attempts (default 2), the next scheduled transaction is
+a telemetry read, even if the incoming write queue never empties. The limit
+bounds transaction count; a transaction can still take the RTU timeout.
+Exhausted commands are dropped and reported through
 registers 37112-37114. Register 37120 includes the pending retry as well as queued
 commands (up to `WRITE_QUEUE_LENGTH + 1`, excluding an in-flight transaction).
 

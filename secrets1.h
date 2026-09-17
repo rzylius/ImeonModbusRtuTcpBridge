@@ -27,6 +27,7 @@
 #define MAX_WRITE_VALUES 5        // Largest write command in IMEON protocol vA.29
 #define MAX_WRITE_RETRIES 3       // Retries after the initial write attempt
 #define MAX_REGISTER_UPDATE_VALUES 31  // Largest predefined read range
+#define MAX_CONSECUTIVE_WRITES 2       // Force a telemetry read after this many writes
 #define MIN_WRITE_INTERVAL 1100        // Must be greater than one second
 #define METER_CONTROL_MIN_INTERVAL 2000
 #define ACTIVATION_RETRY_INTERVAL 5000
