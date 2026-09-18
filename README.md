@@ -178,6 +178,23 @@ firmware. Pass `--modbusmaster /path/to/ModbusMaster` to select the library sour
 The same option is available on `tests/run_tests.py`, which also tests the real
 patched parser with complete, malformed, CRC-invalid, and recovery responses.
 
+### Modbus TCP minimum-frame patch
+
+modbus-esp8266 4.1.0 compares available bytes against a padded in-memory MBAP
+union instead of its seven-byte wire header. A complete eight-byte request
+(header plus function code only) can therefore wait indefinitely before reaching
+the rejection handler. Apply this patch from the TCP library root:
+
+```sh
+patch -p1 < /path/to/ImeonModbusRtuTcpBridge/patches/modbus-esp8266-4.1.0-minimal-frame.patch
+```
+
+The server adapter requires the patch marker. Build/test helpers apply the patch
+to a temporary copy; `--modbus-tcp /path/to/modbus-esp8266` selects the source.
+The host suite runs the real TCP transport parser against simulated sockets,
+covering a split header/function byte, minimal frames, coalesced requests, and
+ordinary reads. This regression fails against the unpatched library.
+
 The bridge sends the activation key from `IMEON_ACTIVATION_KEY_BYTES` in the
 ignored `secrets.h` before starting telemetry reads. The public `secrets1.h`
 contains only an all-zero placeholder and must be configured locally.

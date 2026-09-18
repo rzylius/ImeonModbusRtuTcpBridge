@@ -1,5 +1,8 @@
 #pragma once
 #include <ModbusIP_ESP8266.h>
+#ifndef MODBUSIP_COMPLETE_MINIMAL_FRAMES
+#error "Apply patches/modbus-esp8266-4.1.0-minimal-frame.patch before building"
+#endif
 
 // modbus-esp8266 4.1.0's client transaction allocator reserves ID zero.
 // Server replies must instead echo all 16 bits supplied by the requester.
