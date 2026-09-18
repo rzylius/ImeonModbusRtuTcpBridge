@@ -12,4 +12,9 @@ jobs:
           repository: 4-20ma/ModbusMaster
           ref: v2.0.1
           path: vendor-test/ModbusMaster
-      - run: python3 tests/run_tests.py --modbusmaster vendor-test/ModbusMaster
+      - uses: actions/checkout@v4
+        with:
+          repository: emelianov/modbus-esp8266
+          ref: 4.1.0
+          path: vendor-test/modbus-esp8266
+      - run: python3 tests/run_tests.py --modbusmaster vendor-test/ModbusMaster --modbus-tcp vendor-test/modbus-esp8266

@@ -1,0 +1,20 @@
+--- a/src/ModbusTCPTemplate.h
++++ b/src/ModbusTCPTemplate.h
+@@ -6,6 +6,8 @@
+ */
+ 
+ #pragma once
++// Accept the seven-byte MBAP header plus a one-byte function PDU.
++#define MODBUSIP_COMPLETE_MINIMAL_FRAMES 1
+ #include "Modbus.h"
+ 
+ #define BIT_SET(a,b) ((a) |= (1ULL<<(b)))
+@@ -253,7 +255,7 @@
+ 	for (n = 0; n < MODBUSIP_MAX_CLIENTS; n++) {
+ 		if (!tcpclient[n]) continue;
+ 		if (!tcpclient[n]->connected()) continue;
+-		while (millis() - taskStart < MODBUSIP_MAX_READMS &&  (size_t)tcpclient[n]->available() > sizeof(_MBAP)) {
++		while (millis() - taskStart < MODBUSIP_MAX_READMS &&  (size_t)tcpclient[n]->available() > sizeof(_MBAP.raw)) {
+ #if defined(MODBUSIP_DEBUG)
+ 			Serial.print(n);
+ 			Serial.print(": Bytes available ");

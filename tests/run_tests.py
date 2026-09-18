@@ -10,11 +10,13 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from prepare_modbusmaster import DEFAULT_SOURCE, prepare
+from prepare_modbus_tcp import DEFAULT_SOURCE as TCP_SOURCE, prepare as prepare_tcp
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--modbusmaster", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--modbus-tcp", type=Path, default=TCP_SOURCE)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="imeon-host-tests-") as tmp:
         tmp = Path(tmp)
@@ -42,6 +44,17 @@ def main():
             str(library / "src/ModbusMaster.cpp"), "-o", str(rtu_binary),
         ], check=True)
         subprocess.run([str(rtu_binary)], check=True)
+        tcp_library = prepare_tcp(args.modbus_tcp, tmp / "modbus-esp8266")
+        transport = tmp / "transport"
+        transport.mkdir()
+        shutil.copy2(tcp_library / "src/ModbusTCPTemplate.h", transport)
+        tcp_binary = tmp / "tcp_request_test"
+        subprocess.run([
+            "g++", "-std=c++17", "-I", str(transport),
+            "-I", str(ROOT / "tests/tcp_fakes"),
+            str(ROOT / "tests/tcp_request_test.cpp"), "-o", str(tcp_binary),
+        ], check=True)
+        subprocess.run([str(tcp_binary)], check=True)
 
 
 if __name__ == "__main__":

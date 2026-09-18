@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from prepare_modbusmaster import DEFAULT_SOURCE, prepare
+from prepare_modbus_tcp import DEFAULT_SOURCE as TCP_SOURCE, prepare as prepare_tcp
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", type=Path, action="append", default=[])
     parser.add_argument("--modbusmaster", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--modbus-tcp", type=Path, default=TCP_SOURCE)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="imeon-build-") as tmp:
         sketch = Path(tmp) / "imeon_bridge_104_rw"
@@ -28,7 +30,8 @@ def main():
                    "--board-options", "LoopCore=0,EventsCore=0",
                    "--build-path", str(Path(tmp) / "build")]
         patched = prepare(args.modbusmaster, Path(tmp) / "ModbusMaster")
-        command += ["--library", str(patched)]
+        patched_tcp = prepare_tcp(args.modbus_tcp, Path(tmp) / "modbus-esp8266")
+        command += ["--library", str(patched), "--library", str(patched_tcp)]
         for library in args.library:
             command += ["--library", str(library.resolve())]
         subprocess.run(command + [str(sketch)], check=True)
